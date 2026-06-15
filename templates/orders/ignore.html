@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Ignore Order{% endblock %}
+{% block content %}
+<h1>Ignore Order {{ order.bybit_order_id }}</h1>
+<form method="post">{% csrf_token %}
+    <div class="mb-3">
+        <label class="form-label">Reason (required)</label>
+        {{ form.ignore_reason }}
+    </div>
+    <button type="submit" class="btn btn-warning">Ignore</button>
+    <a href="{% url 'orders:list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

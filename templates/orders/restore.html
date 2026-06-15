@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Restore Order{% endblock %}
+{% block content %}
+<h1>Restore Order {{ order.bybit_order_id }}?</h1>
+<form method="post">{% csrf_token %}
+    <button type="submit" class="btn btn-success">Restore</button>
+    <a href="{% url 'orders:list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<h1 class="mb-3">Orders</h1>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-auto">{{ form.date_from.label_tag }} {{ form.date_from }}</div>
+    <div class="col-auto">{{ form.date_to.label_tag }} {{ form.date_to }}</div>
+    <div class="col-auto">{{ form.side.label_tag }} {{ form.side }}</div>
+    <div class="col-auto">{{ form.search.label_tag }} {{ form.search }}</div>
+    <div class="col-auto form-check mt-4">
+        {{ form.show_ignored }} <label class="form-check-label">Show ignored</label>
+    </div>
+    <div class="col-auto mt-3"><button class="btn btn-primary btn-sm">Filter</button></div>
+</form>
+
+<div class="table-responsive">
+<table class="table table-sm table-striped">
+    <thead><tr>
+        <th>Date MSK</th><th>Order ID</th><th>Side</th><th>Qty Net</th><th>Price</th>
+        <th>RUB</th><th>Fee</th><th>Counterparty</th><th>Ledger</th><th>Actions</th>
+    </tr></thead>
+    <tbody>
+    {% for o in orders %}
+    <tr {% if not o.show_in_orders %}class="table-secondary"{% endif %}>
+        <td>{{ o.created_at_moscow|date:"Y-m-d H:i:s" }}</td>
+        <td>{{ o.bybit_order_id }}</td>
+        <td>{{ o.side }}</td>
+        <td>{{ o.quantity_net }}</td>
+        <td>{{ o.price|floatformat:2 }}</td>
+        <td>{{ o.amount_rub|floatformat:2 }}</td>
+        <td>{{ o.fee_amount }} {{ o.fee_currency }}</td>
+        <td>{{ o.counterparty_name|truncatechars:30 }}</td>
+        <td>{% if o.include_in_ledger %}✓{% else %}✗{% endif %}</td>
+        <td>
+            <a href="{% url 'orders:raw_json' o.pk %}" class="btn btn-sm btn-outline-secondary">JSON</a>
+            {% if o.show_in_orders %}
+            <a href="{% url 'orders:ignore' o.pk %}" class="btn btn-sm btn-outline-warning">Ignore</a>
+            {% else %}
+            <form method="post" action="{% url 'orders:restore' o.pk %}" class="d-inline">{% csrf_token %}
+                <button class="btn btn-sm btn-outline-success">Restore</button>
+            </form>
+            {% endif %}
+        </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="10" class="text-muted">No orders</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}

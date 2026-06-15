@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1 class="mb-4">Dashboard</h1>
+
+{% if not account %}
+<div class="alert alert-warning">
+    No active exchange account. <a href="/admin/exchange/exchangeaccount/add/">Add one in Admin</a>.
+</div>
+{% else %}
+
+<div class="mb-3">
+    <form method="get" class="row g-2 align-items-end">
+        <div class="col-auto">
+            <select name="period" class="form-select" onchange="this.form.submit()">
+                <option value="today" {% if period == "today" %}selected{% endif %}>Today</option>
+                <option value="7" {% if period == "7" %}selected{% endif %}>7 days</option>
+                <option value="30" {% if period == "30" %}selected{% endif %}>30 days</option>
+                <option value="month" {% if period == "month" %}selected{% endif %}>This month</option>
+            </select>
+        </div>
+    </form>
+</div>
+
+{% if balance_warning %}
+<div class="alert alert-danger">Balance diff detected in last reconciliation!</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Total Equity</div>
+        <div class="fs-4">{% if latest %}{{ latest.total_equity|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Bank Balance</div>
+        <div class="fs-4">{% if latest %}{{ latest.bank_balance|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Exchange Balance</div>
+        <div class="fs-4">{% if latest %}{{ latest.exchange_balance|floatformat:4 }} USDT{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">WAC / Last Price</div>
+        <div class="fs-4">{% if latest %}{{ latest.wac_price|floatformat:2 }} / {{ latest.last_price|floatformat:2 }}{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Daily Total Equity PnL</div>
+        <div class="fs-4">{% if today_snap %}{{ today_snap.daily_total_equity_pnl|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Daily Realized WAC PnL</div>
+        <div class="fs-4">{% if today_snap %}{{ today_snap.daily_wac_realized_pnl|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Net Profit After Tax (today)</div>
+        <div class="fs-4">{% if today_snap %}{{ today_snap.net_profit_after_tax|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body">
+        <div class="text-muted small">Last Sync</div>
+        <div class="fs-6">{% if last_sync %}{{ last_sync.status }} — {{ last_sync.started_at|date:"Y-m-d H:i" }}{% else %}Never{% endif %}</div>
+    </div></div></div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartEquity"></canvas></div></div></div>
+    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartEquityPnl"></canvas></div></div></div>
+    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartWacPnl"></canvas></div></div></div>
+    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartNetProfit"></canvas></div></div></div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const labels = {{ chart_labels|safe }};
+function makeChart(id, label, data, color) {
+    const el = document.getElementById(id);
+    if (!el || !labels.length) return;
+    new Chart(el, {
+        type: 'line',
+        data: { labels, datasets: [{ label, data, borderColor: color, tension: 0.2, fill: false }] },
+        options: { responsive: true, plugins: { legend: { display: true } } }
+    });
+}
+makeChart('chartEquity', 'Total Equity', {{ chart_equity|safe }}, '#0d6efd');
+makeChart('chartEquityPnl', 'Daily Total Equity PnL', {{ chart_equity_pnl|safe }}, '#198754');
+makeChart('chartWacPnl', 'Daily Realized WAC PnL', {{ chart_wac_pnl|safe }}, '#fd7e14');
+makeChart('chartNetProfit', 'Net Profit After Tax', {{ chart_net_profit|safe }}, '#6f42c1');
+</script>
+{% endblock %}

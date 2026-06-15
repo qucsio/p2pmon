@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Daily Report{% endblock %}
+{% block content %}
+<h1>Daily Report</h1>
+<div class="table-responsive">
+<table class="table table-striped table-sm">
+    <thead><tr>
+        <th>Day</th><th>Bank</th><th>Exchange</th><th>Equity</th>
+        <th>Equity PnL</th><th>WAC Realized</th><th>WAC Unrealized</th>
+        <th>Volume USDT</th><th>Net After Tax</th><th>WAC</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+        <td>{{ r.day }}</td>
+        <td>{{ r.bank_balance|floatformat:2 }}</td>
+        <td>{{ r.exchange_balance|floatformat:4 }}</td>
+        <td>{{ r.total_equity|floatformat:2 }}</td>
+        <td>{{ r.daily_total_equity_pnl|floatformat:2 }}</td>
+        <td>{{ r.daily_wac_realized_pnl|floatformat:2 }}</td>
+        <td>{{ r.daily_wac_unrealized_pnl|floatformat:2 }}</td>
+        <td>{{ r.volume_usdt|floatformat:4 }}</td>
+        <td>{{ r.net_profit_after_tax|floatformat:2 }}</td>
+        <td>{{ r.wac_price|floatformat:2 }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}

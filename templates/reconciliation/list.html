@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Reconciliation{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between mb-3">
+    <h1>Reconciliation</h1>
+    <a href="{% url 'reconciliation:create' %}" class="btn btn-primary">New Snapshot</a>
+</div>
+
+{% if calculated_bank is not None %}
+<div class="alert alert-info">
+    Current calculated: Bank {{ calculated_bank|floatformat:2 }} ₽ | Exchange {{ calculated_exchange|floatformat:6 }} USDT
+</div>
+{% endif %}
+
+<table class="table table-striped">
+    <thead><tr>
+        <th>Date</th><th>Fact Bank</th><th>Calc Bank</th><th>Bank Diff</th>
+        <th>Fact Exchange</th><th>Calc Exchange</th><th>Exch Diff</th><th>Actions</th>
+    </tr></thead>
+    <tbody>
+    {% for s in snapshots %}
+    <tr>
+        <td>{{ s.snapshot_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ s.bank_balance_fact|floatformat:2 }}</td>
+        <td>{{ s.bank_balance_calculated|floatformat:2 }}</td>
+        <td class="{% if s.bank_diff != 0 %}text-danger{% endif %}">{{ s.bank_diff|floatformat:2 }}</td>
+        <td>{{ s.exchange_balance_fact|floatformat:6 }}</td>
+        <td>{{ s.exchange_balance_calculated|floatformat:6 }}</td>
+        <td class="{% if s.exchange_diff != 0 %}text-danger{% endif %}">{{ s.exchange_diff|floatformat:6 }}</td>
+        <td>
+            {% if s.bank_diff != 0 %}
+            <a href="{% url 'reconciliation:correction' s.pk 'bank' %}" class="btn btn-sm btn-warning">Bank correction</a>
+            {% endif %}
+            {% if s.exchange_diff != 0 %}
+            <a href="{% url 'reconciliation:correction' s.pk 'exchange' %}" class="btn btn-sm btn-warning">Exchange correction</a>
+            {% endif %}
+        </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8" class="text-muted">No snapshots</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
