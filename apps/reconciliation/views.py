@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
@@ -77,7 +79,8 @@ def create_correction(request, pk, account_type):
                 account=LedgerAdjustment.ACCOUNT_BANK,
                 type=LedgerAdjustment.TYPE_CORRECTION,
                 currency="RUB",
-                amount=snap.bank_diff,
+                amount_rub=snap.bank_diff,
+                amount_usdt=Decimal("0"),
                 effective_at=snap.snapshot_at,
                 comment=f"Reconciliation correction from snapshot {snap.id}",
                 created_by=request.user,
@@ -88,7 +91,8 @@ def create_correction(request, pk, account_type):
                 account=LedgerAdjustment.ACCOUNT_EXCHANGE,
                 type=LedgerAdjustment.TYPE_CORRECTION,
                 currency="USDT",
-                amount=snap.exchange_diff,
+                amount_rub=Decimal("0"),
+                amount_usdt=snap.exchange_diff,
                 effective_at=snap.snapshot_at,
                 comment=f"Reconciliation correction from snapshot {snap.id}",
                 created_by=request.user,

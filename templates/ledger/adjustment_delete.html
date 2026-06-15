@@ -2,7 +2,7 @@
 {% block title %}Delete Adjustment{% endblock %}
 {% block content %}
 <h1>Delete adjustment?</h1>
-<p>{{ adjustment.type }} — {{ adjustment.amount }} {{ adjustment.currency }}</p>
+<p>{{ adjustment.type }} — {{ adjustment.display_amount }} {{ adjustment.currency }}</p>
 <form method="post">{% csrf_token %}
     <button type="submit" class="btn btn-danger">Delete</button>
     <a href="{% url 'ledger:adjustment_list' %}" class="btn btn-secondary">Cancel</a>

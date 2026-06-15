@@ -38,7 +38,8 @@ class LedgerAdjustment(TimestampedModel):
     account = models.CharField(max_length=16, choices=ACCOUNT_CHOICES)
     type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     currency = models.CharField(max_length=16)
-    amount = models.DecimalField(**settings.DECIMAL_RUB)
+    amount_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
+    amount_usdt = models.DecimalField(**settings.DECIMAL_USDT, default=0)
     effective_at = models.DateTimeField()
     comment = models.TextField(blank=True)
     include_in_ledger = models.BooleanField(default=True)
@@ -63,7 +64,45 @@ class LedgerAdjustment(TimestampedModel):
         ordering = ["effective_at", "id"]
 
     def __str__(self):
-        return f"{self.type} {self.amount} {self.currency} @ {self.effective_at:%Y-%m-%d}"
+        if self.account == self.ACCOUNT_BANK:
+            return f"{self.type} {self.amount_rub} RUB @ {self.effective_at:%Y-%m-%d}"
+        return f"{self.type} {self.amount_usdt} USDT @ {self.effective_at:%Y-%m-%d}"
+
+    @property
+    def display_amount(self):
+        if self.account == self.ACCOUNT_BANK:
+            return self.amount_rub
+        return self.amount_usdt
+
+    def signed_amount_rub(self):
+        from decimal import Decimal
+
+        if self.account != self.ACCOUNT_BANK:
+            return Decimal("0")
+        return self._apply_type_sign(self.amount_rub)
+
+    def signed_amount_usdt(self):
+        from decimal import Decimal
+
+        if self.account != self.ACCOUNT_EXCHANGE:
+            return Decimal("0")
+        return self._apply_type_sign(self.amount_usdt)
+
+    def _apply_type_sign(self, value):
+        from decimal import Decimal
+
+        if self.type in (
+            self.TYPE_WITHDRAWAL,
+            self.TYPE_TAX_PAYMENT,
+            self.TYPE_INVESTOR_WITHDRAWAL,
+        ):
+            return -abs(value)
+        if self.type in (
+            self.TYPE_DEPOSIT,
+            self.TYPE_INVESTOR_DEPOSIT,
+        ):
+            return abs(value)
+        return value
 
 
 class LedgerEvent(models.Model):

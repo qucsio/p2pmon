@@ -28,21 +28,26 @@ class Investor(TimestampedModel):
     def clean(self):
         if not self.is_active:
             return
-        total = (
-            Investor.objects.filter(user=self.user, is_active=True)
-            .exclude(pk=self.pk)
-            .aggregate(total=Sum("share_percent"))["total"]
-            or Decimal("0")
-        )
-        total += self.share_percent
-        if total != Decimal("100"):
+        total = active_share_total(self.user, exclude_pk=self.pk) + self.share_percent
+        if total > Decimal("100"):
             raise ValidationError(
-                f"Active investor shares must sum to 100%, currently would be {total}%"
+                f"Active investor shares cannot exceed 100%, currently would be {total}%"
             )
 
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+def active_share_total(user, exclude_pk=None) -> Decimal:
+    qs = Investor.objects.filter(user=user, is_active=True)
+    if exclude_pk:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.aggregate(total=Sum("share_percent"))["total"] or Decimal("0")
+
+
+def shares_fully_allocated(user) -> bool:
+    return active_share_total(user) == Decimal("100")
 
 
 class TaxSetting(TimestampedModel):

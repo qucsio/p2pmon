@@ -39,9 +39,14 @@ class BybitClient:
         for attempt in range(max_retries):
             try:
                 result = func(**kwargs)
-                if result.get("ret_code", 0) != 0 and result.get("retCode", 0) != 0:
-                    ret_msg = result.get("ret_msg") or result.get("retMsg", "Unknown error")
-                    raise RuntimeError(f"Bybit API error: {ret_msg}")
+                code = result.get("retCode", result.get("ret_code", 0))
+                try:
+                    code = int(code)
+                except (TypeError, ValueError):
+                    code = 0
+                if code != 0:
+                    ret_msg = result.get("retMsg") or result.get("ret_msg", "Unknown error")
+                    raise RuntimeError(f"Bybit API error ({code}): {ret_msg}")
                 return result
             except Exception as exc:
                 last_exc = exc

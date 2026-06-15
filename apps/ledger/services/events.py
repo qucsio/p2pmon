@@ -87,14 +87,7 @@ def build_events(exchange_account) -> list[dict]:
         key = (adj.account, adj.type)
         if key not in ADJUSTMENT_TYPE_MAP:
             continue
-        event_type, sign = ADJUSTMENT_TYPE_MAP[key]
-        amount = adj.amount
-        if sign == -1:
-            amount = -abs(amount)
-        elif sign == 1:
-            amount = abs(amount)
-
-        is_bank = adj.account == LedgerAdjustment.ACCOUNT_BANK
+        event_type, _sign = ADJUSTMENT_TYPE_MAP[key]
         events.append({
             "event_type": event_type,
             "source_type": LedgerEvent.SOURCE_ADJUSTMENT,
@@ -102,8 +95,8 @@ def build_events(exchange_account) -> list[dict]:
             "occurred_at_utc": adj.effective_at,
             "occurred_at_moscow": adj.effective_at,
             "currency": adj.currency,
-            "amount_rub": amount if is_bank else Decimal("0"),
-            "amount_usdt": amount if not is_bank else Decimal("0"),
+            "amount_rub": adj.signed_amount_rub(),
+            "amount_usdt": adj.signed_amount_usdt(),
             "price": Decimal("0"),
             "fee_amount": Decimal("0"),
             "fee_currency": "",

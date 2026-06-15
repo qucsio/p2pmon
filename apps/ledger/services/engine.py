@@ -42,10 +42,13 @@ class DayAccumulator:
     volume_usdt: Decimal = field(default_factory=lambda: Decimal("0"))
     volume_rub: Decimal = field(default_factory=lambda: Decimal("0"))
     last_price: Decimal | None = None
+    last_price_eod: Decimal | None = None
     bank_eod: Decimal | None = None
     exchange_eod: Decimal | None = None
     wac_eod: Decimal | None = None
     wac_qty_eod: Decimal | None = None
+    wac_cost_eod: Decimal | None = None
+    wac_realized_cum_eod: Decimal | None = None
     bank_adj_rub: Decimal = field(default_factory=lambda: Decimal("0"))
     exchange_adj_usdt: Decimal = field(default_factory=lambda: Decimal("0"))
 
@@ -116,20 +119,25 @@ class LedgerEngine:
             acc.exchange_eod = state.exchange
             acc.wac_eod = state.wac_price()
             acc.wac_qty_eod = state.wac_qty
+            acc.wac_cost_eod = state.wac_cost
+            acc.wac_realized_cum_eod = state.wac_realized_cum
+            if acc.last_price is not None:
+                acc.last_price_eod = acc.last_price
+            elif state.last_price > 0:
+                acc.last_price_eod = state.last_price
 
         all_days = sorted(daily_acc.keys())
-        running_wac_pnl = Decimal("0")
 
         for day in all_days:
             acc = daily_acc[day]
-            last_price = acc.last_price or state.last_price or Decimal("0")
-            if acc.last_price:
-                state.last_price = acc.last_price
+            last_price = acc.last_price_eod or acc.last_price or Decimal("0")
 
             bank = acc.bank_eod or Decimal("0")
             exchange = acc.exchange_eod or Decimal("0")
             wac_price_val = acc.wac_eod or Decimal("0")
             wac_qty = acc.wac_qty_eod or Decimal("0")
+            wac_cost = acc.wac_cost_eod or Decimal("0")
+            wac_realized_cum = acc.wac_realized_cum_eod or Decimal("0")
 
             equity = q_rub(bank + q_rub(exchange * last_price))
             adj_effect = q_rub(acc.bank_adj_rub + q_rub(acc.exchange_adj_usdt * last_price))
@@ -140,7 +148,7 @@ class LedgerEngine:
                 daily_equity_pnl = Decimal("0")
 
             wac_unrealized = q_rub((last_price - wac_price_val) * wac_qty) if wac_qty > 0 else Decimal("0")
-            running_wac_pnl = q_rub(state.wac_realized_cum + wac_unrealized)
+            running_wac_pnl = q_rub(wac_realized_cum + wac_unrealized)
 
             gross_realized = acc.wac_realized
             fees = acc.fees
@@ -169,7 +177,7 @@ class LedgerEngine:
                 last_price=last_price,
                 wac_price=wac_price_val,
                 wac_qty=wac_qty,
-                wac_cost=state.wac_cost,
+                wac_cost=wac_cost,
             )
 
             prev_equity = equity

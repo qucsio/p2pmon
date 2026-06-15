@@ -25,6 +25,6 @@
     </tbody>
 </table>
 {% if total_share != 100 %}
-<div class="alert alert-warning">Active shares must sum to 100% (currently {{ total_share }}%)</div>
+<div class="alert alert-warning">Active shares should sum to 100% for allocation (currently {{ total_share }}%). You can still add investors incrementally.</div>
 {% endif %}
 {% endblock %}

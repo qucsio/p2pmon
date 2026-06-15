@@ -5,7 +5,7 @@ from apps.ledger.models import DailySnapshot, LedgerAdjustment, LedgerEvent, Wee
 
 @admin.register(LedgerAdjustment)
 class LedgerAdjustmentAdmin(admin.ModelAdmin):
-    list_display = ("type", "account", "amount", "currency", "effective_at", "is_deleted")
+    list_display = ("type", "account", "amount_rub", "amount_usdt", "currency", "effective_at", "is_deleted")
     list_filter = ("type", "account", "is_deleted")
 
 
