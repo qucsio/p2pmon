@@ -1,16 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Adjustments{% endblock %}
+{% block title %}{{ title }}{% endblock %}
+{% block heading %}{{ title }}{% endblock %}
 {% block content %}
-<h1>{{ title }}</h1>
-<form method="post">{% csrf_token %}
-    {% for field in form %}
-    <div class="mb-3">
-        <label class="form-label">{{ field.label }}</label>
-        {{ field }}
-        {% if field.errors %}<div class="text-danger">{{ field.errors }}</div>{% endif %}
-    </div>
-    {% endfor %}
-    <button type="submit" class="btn btn-primary">Save</button>
-    <a href="{% url 'ledger:adjustment_list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="panel" style="max-width:560px;">
+    <form method="post">{% csrf_token %}
+        {% for field in form %}
+        <div class="mb-3">
+            <label class="form-label" style="font-size:12.5px;color:var(--txt-2);">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}<div class="neg" style="font-size:12px;margin-top:4px;">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <div style="display:flex;gap:9px;margin-top:18px;">
+            <button type="submit" class="btn-accent">Сохранить</button>
+            <a href="{% url 'ledger:adjustment_list' %}" class="btn-ghost">Отмена</a>
+        </div>
+    </form>
+</div>
 {% endblock %}

@@ -1,10 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Delete Adjustment{% endblock %}
+{% block title %}Удалить корректировку{% endblock %}
+{% block heading %}Удалить корректировку?{% endblock %}
 {% block content %}
-<h1>Delete adjustment?</h1>
-<p>{{ adjustment.type }} — {{ adjustment.display_amount }} {{ adjustment.currency }}</p>
-<form method="post">{% csrf_token %}
-    <button type="submit" class="btn btn-danger">Delete</button>
-    <a href="{% url 'ledger:adjustment_list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="panel" style="max-width:480px;">
+    <p style="color:var(--txt-2);">{{ adjustment.get_type_display }} — <b class="num">{{ adjustment.display_amount }} {{ adjustment.currency }}</b></p>
+    <form method="post" style="display:flex;gap:9px;margin-top:14px;">{% csrf_token %}
+        <button type="submit" class="btn-ghost danger">Удалить</button>
+        <a href="{% url 'ledger:adjustment_list' %}" class="btn-ghost">Отмена</a>
+    </form>
+</div>
 {% endblock %}

@@ -41,7 +41,7 @@
         </div>
     </div>
     <div style="overflow-x:auto;padding-bottom:6px;">
-        <div id="heatmap" class="heatmap"></div>
+        <div id="calWrap"></div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--txt-3);font-size:11px;">
         Меньше
@@ -79,32 +79,90 @@ function shade(v, mx, rgb){
     return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${t.toFixed(3)})`;
 }
 
-function buildHeatmap(){
-    const wrap = document.getElementById('heatmap');
-    wrap.innerHTML = '';
-    if(!cal.length){ wrap.innerHTML = '<div style="color:var(--txt-3)">Нет данных</div>'; return; }
-    const rgb = colorFor(mode), mx = maxFor(mode);
-    // Fill from first date's week start to today, aligning weekday rows.
-    const start = new Date(cal[0].date), end = new Date(cal[cal.length-1].date);
-    const cur = new Date(start);
-    cur.setDate(cur.getDate() - ((cur.getDay()+6)%7)); // back to Monday
-    while(cur <= end){
-        const iso = cur.toISOString().slice(0,10);
-        const c = byDate[iso];
-        const v = c ? c[mode] : 0;
-        const cell = document.createElement('div');
-        cell.className = 'heat-cell';
-        cell.style.background = shade(v, mx, rgb);
-        cell.title = iso;
-        cell.onmouseenter = ()=>{ document.getElementById('hoverInfo').textContent =
-            `${iso}: ${Math.round(v).toLocaleString('ru-RU')} ₽`; };
-        wrap.appendChild(cell);
-        cur.setDate(cur.getDate()+1);
-    }
-    const rgbS = `rgb(${rgb.join(',')})`;
+const WD = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const MONTHS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const fmt = v => Math.round(v).toLocaleString('ru-RU');
+const isoOf = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+
+function updateLegend(rgb){
     [['lg1',.25],['lg2',.45],['lg3',.7],['lg4',1]].forEach(([id,t])=>{
         document.getElementById(id).style.background = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${t})`;
     });
+}
+
+function buildHeatmap(){
+    const wrap = document.getElementById('calWrap');
+    wrap.innerHTML = '';
+    if(!cal.length){ wrap.innerHTML = '<div style="color:var(--txt-3)">Нет данных за период</div>'; return; }
+    const rgb = colorFor(mode), mx = maxFor(mode);
+    const start = new Date(cal[0].date+'T00:00:00'), end = new Date(cal[cal.length-1].date+'T00:00:00');
+    const span = Math.round((end-start)/86400000)+1;
+    if(span <= 35) buildCompact(wrap, rgb, mx, start, end);
+    else buildGrid(wrap, rgb, mx, start, end);
+    updateLegend(rgb);
+}
+
+// Sparse data → labeled day tiles (avoids the near-empty year grid).
+function buildCompact(wrap, rgb, mx, start, end){
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;';
+    const cur = new Date(start);
+    while(cur <= end){
+        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0;
+        const cell = document.createElement('div');
+        cell.style.cssText = `width:56px;height:60px;border-radius:9px;display:flex;flex-direction:column;
+            align-items:center;justify-content:center;gap:3px;background:${shade(v,mx,rgb)};
+            border:1px solid var(--border-soft);`;
+        cell.innerHTML = `<span style="font-size:10px;color:var(--txt-3)">${WD[(cur.getDay()+6)%7]}, ${cur.getDate()}</span>
+            <span class="num" style="font-size:11px;color:var(--txt)">${v?fmt(v):'—'}</span>`;
+        cell.title = `${iso}: ${fmt(v)} ₽`;
+        row.appendChild(cell);
+        cur.setDate(cur.getDate()+1);
+    }
+    wrap.appendChild(row);
+}
+
+// Dense data → GitHub-style grid with weekday + month labels.
+function buildGrid(wrap, rgb, mx, start, end){
+    const box = document.createElement('div');
+    box.style.cssText = 'display:inline-flex;gap:6px;';
+
+    const wdCol = document.createElement('div');
+    wdCol.style.cssText = 'display:grid;grid-template-rows:repeat(7,15px);gap:4px;margin-top:18px;';
+    WD.forEach((w,i)=>{ const l=document.createElement('div');
+        l.textContent = (i%2===0)?w:'';
+        l.style.cssText='font-size:9px;color:var(--txt-3);line-height:15px;'; wdCol.appendChild(l); });
+
+    const area = document.createElement('div');
+    const monthRow = document.createElement('div');
+    monthRow.style.cssText = 'position:relative;height:14px;margin-bottom:4px;';
+    const grid = document.createElement('div');
+    grid.className = 'heatmap';
+
+    const cur = new Date(start);
+    cur.setDate(cur.getDate() - ((cur.getDay()+6)%7)); // back to Monday
+    let lastMonth = -1, week = 0;
+    while(cur <= end){
+        if((cur.getDay()+6)%7===0 && cur.getMonth()!==lastMonth){
+            lastMonth = cur.getMonth();
+            const ml = document.createElement('div');
+            ml.textContent = MONTHS[cur.getMonth()];
+            ml.style.cssText = `position:absolute;left:${week*19}px;font-size:9px;color:var(--txt-3);`;
+            monthRow.appendChild(ml);
+        }
+        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0;
+        const cell = document.createElement('div');
+        cell.className = 'heat-cell';
+        cell.style.background = shade(v, mx, rgb);
+        cell.title = `${iso}: ${fmt(v)} ₽`;
+        cell.onmouseenter = ()=>{ document.getElementById('hoverInfo').textContent = `${iso}: ${fmt(v)} ₽`; };
+        grid.appendChild(cell);
+        if((cur.getDay()+6)%7===6) week++;
+        cur.setDate(cur.getDate()+1);
+    }
+    area.appendChild(monthRow); area.appendChild(grid);
+    box.appendChild(wdCol); box.appendChild(area);
+    wrap.appendChild(box);
 }
 buildHeatmap();
 

@@ -1,21 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Weekly Report{% endblock %}
+{% block title %}Недельный отчёт{% endblock %}
+{% block heading %}Недельный отчёт{% endblock %}
 {% block content %}
-<h1>Weekly Report</h1>
-<table class="table table-striped table-sm">
+<div class="panel table-panel panel-pad-0">
+<div class="table-responsive">
+<table class="table">
     <thead><tr>
-        <th>Week</th><th>Equity</th><th>Equity PnL</th><th>WAC Realized</th><th>Net After Tax</th>
+        <th>Неделя</th><th class="text-end">Equity</th><th class="text-end">Equity PnL</th><th class="text-end">WAC Realized</th><th class="text-end">После налога</th>
     </tr></thead>
     <tbody>
     {% for r in rows %}
     <tr>
-        <td>{{ r.week }}</td>
-        <td>{{ r.total_equity|floatformat:2 }}</td>
-        <td>{{ r.daily_total_equity_pnl|floatformat:2 }}</td>
-        <td>{{ r.daily_wac_realized_pnl|floatformat:2 }}</td>
-        <td>{{ r.net_profit_after_tax|floatformat:2 }}</td>
+        <td class="num">{{ r.week }}</td>
+        <td class="num text-end">{{ r.total_equity|floatformat:2 }}</td>
+        <td class="num text-end {% if r.daily_total_equity_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.daily_total_equity_pnl|floatformat:2 }}</td>
+        <td class="num text-end {% if r.daily_wac_realized_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.daily_wac_realized_pnl|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.net_profit_after_tax|floatformat:2 }}</td>
     </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="5">Нет данных</td></tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
+</div>
 {% endblock %}

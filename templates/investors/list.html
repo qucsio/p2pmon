@@ -1,30 +1,37 @@
 {% extends "base.html" %}
-{% block title %}Investors{% endblock %}
-{% block content %}
-<div class="d-flex justify-content-between mb-3">
-    <h1>Investors <small class="text-muted">(active shares: {{ total_share }}%)</small></h1>
-    <div>
-        <a href="{% url 'investors:create' %}" class="btn btn-primary">Add</a>
-        <a href="{% url 'investors:allocation' %}" class="btn btn-outline-primary">Calculate Allocation</a>
-    </div>
+{% block title %}Инвесторы{% endblock %}
+{% block heading %}Инвесторы{% endblock %}
+{% block topbar_extra %}
+<div class="topbar-actions">
+    <span class="pill gray">Активные доли: {{ total_share }}%</span>
+    <a href="{% url 'investors:allocation' %}" class="btn-ghost">Рассчитать распределение</a>
+    <a href="{% url 'investors:create' %}" class="btn-accent">+ Добавить</a>
 </div>
-<table class="table table-striped">
-    <thead><tr><th>Name</th><th>Share %</th><th>Active</th><th>Comment</th><th></th></tr></thead>
+{% endblock %}
+{% block content %}
+
+{% if total_share != 100 %}
+<div class="alert alert-warning">Сумма активных долей должна быть 100% для распределения (сейчас {{ total_share }}%). Можно добавлять инвесторов постепенно.</div>
+{% endif %}
+
+<div class="panel table-panel panel-pad-0">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>Имя</th><th class="text-end">Доля %</th><th>Активен</th><th>Комментарий</th><th class="text-end">Действия</th></tr></thead>
     <tbody>
     {% for i in investors %}
-    <tr>
+    <tr {% if not i.is_active %}class="muted-row"{% endif %}>
         <td>{{ i.name }}</td>
-        <td>{{ i.share_percent }}</td>
-        <td>{% if i.is_active %}Yes{% else %}No{% endif %}</td>
+        <td class="num text-end">{{ i.share_percent }}</td>
+        <td>{% if i.is_active %}<span class="pill green">Да</span>{% else %}<span class="pill gray">Нет</span>{% endif %}</td>
         <td>{{ i.comment|truncatechars:40 }}</td>
-        <td><a href="{% url 'investors:edit' i.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+        <td class="text-end"><a href="{% url 'investors:edit' i.pk %}" class="btn-ghost btn-xs">Изменить</a></td>
     </tr>
     {% empty %}
-    <tr><td colspan="5" class="text-muted">No investors</td></tr>
+    <tr class="empty-row"><td colspan="5">Нет инвесторов</td></tr>
     {% endfor %}
     </tbody>
 </table>
-{% if total_share != 100 %}
-<div class="alert alert-warning">Active shares should sum to 100% for allocation (currently {{ total_share }}%). You can still add investors incrementally.</div>
-{% endif %}
+</div>
+</div>
 {% endblock %}

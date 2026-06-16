@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Restore Order{% endblock %}
+{% block title %}Вернуть ордер{% endblock %}
+{% block heading %}Вернуть ордер {{ order.bybit_order_id }}?{% endblock %}
 {% block content %}
-<h1>Restore Order {{ order.bybit_order_id }}?</h1>
-<form method="post">{% csrf_token %}
-    <button type="submit" class="btn btn-success">Restore</button>
-    <a href="{% url 'orders:list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="panel" style="max-width:480px;">
+    <form method="post" style="display:flex;gap:9px;">{% csrf_token %}
+        <button type="submit" class="btn-ghost ok">Вернуть</button>
+        <a href="{% url 'orders:list' %}" class="btn-ghost">Отмена</a>
+    </form>
+</div>
 {% endblock %}

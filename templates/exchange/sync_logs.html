@@ -1,38 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Sync Logs{% endblock %}
-{% block content %}
-<div class="d-flex justify-content-between mb-3">
-    <h1>Sync Logs</h1>
+{% block title %}Синхронизация{% endblock %}
+{% block heading %}Синхронизация{% endblock %}
+{% block topbar_extra %}
+<div class="topbar-actions">
     <form method="post" action="{% url 'exchange:sync_manual' %}">{% csrf_token %}
-        <button class="btn btn-primary">Refresh Now</button>
+        <button class="btn-accent" type="submit">
+            <svg viewBox="0 0 24 24" fill="none" style="width:14px;height:14px;"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Обновить сейчас
+        </button>
     </form>
 </div>
+{% endblock %}
+{% block content %}
 
 {% if next_sync %}
-<p class="text-muted">Next scheduled sync (approx): {{ next_sync|date:"Y-m-d H:i" }} MSK</p>
+<p style="color:var(--txt-3);font-size:12.5px;margin-bottom:16px;">Следующая синхронизация (примерно): <span class="num">{{ next_sync|date:"d.m.Y H:i" }}</span> MSK</p>
 {% endif %}
 
-<table class="table table-striped table-sm">
+<div class="panel table-panel panel-pad-0">
+<div class="table-responsive">
+<table class="table">
     <thead><tr>
-        <th>Started</th><th>Status</th><th>Mode</th><th>Fetched</th><th>Created</th>
-        <th>Updated</th><th>Details</th><th>Errors</th><th>Message</th>
+        <th>Начато</th><th>Статус</th><th>Режим</th><th class="text-end">Получено</th><th class="text-end">Создано</th>
+        <th class="text-end">Обновлено</th><th class="text-end">Детали</th><th class="text-end">Ошибки</th><th>Сообщение</th>
     </tr></thead>
     <tbody>
     {% for log in logs %}
     <tr>
-        <td>{{ log.started_at|date:"Y-m-d H:i:s" }}</td>
-        <td><span class="badge bg-{% if log.status == 'success' %}success{% elif log.status == 'failed' %}danger{% elif log.status == 'skipped' %}secondary{% else %}warning{% endif %}">{{ log.status }}</span></td>
+        <td class="num" style="white-space:nowrap;">{{ log.started_at|date:"d.m.Y H:i:s" }}</td>
+        <td><span class="pill {% if log.status == 'success' %}green{% elif log.status == 'failed' %}red{% else %}gray{% endif %}">{{ log.status }}</span></td>
         <td>{{ log.get_mode_display }}</td>
-        <td>{{ log.orders_fetched }}</td>
-        <td>{{ log.orders_created }}</td>
-        <td>{{ log.orders_updated }}</td>
-        <td>{{ log.details_fetched }}</td>
-        <td>{{ log.errors_count }}</td>
-        <td>{{ log.message|truncatechars:60 }}</td>
+        <td class="num text-end">{{ log.orders_fetched }}</td>
+        <td class="num text-end">{{ log.orders_created }}</td>
+        <td class="num text-end">{{ log.orders_updated }}</td>
+        <td class="num text-end">{{ log.details_fetched }}</td>
+        <td class="num text-end {% if log.errors_count %}neg{% endif %}">{{ log.errors_count }}</td>
+        <td style="color:var(--txt-2);">{{ log.message|truncatechars:60 }}</td>
     </tr>
     {% empty %}
-    <tr><td colspan="9" class="text-muted">No sync logs yet</td></tr>
+    <tr class="empty-row"><td colspan="9">Пока нет логов синхронизации</td></tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
+</div>
 {% endblock %}

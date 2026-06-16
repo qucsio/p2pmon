@@ -103,6 +103,13 @@ def dashboard(request):
         float(s.daily_total_equity_pnl - adj_by_day.get(s.day, Decimal("0")))
         for s in snapshots
     ]
+    # Total equity with capital-flow steps removed: subtract the running sum of
+    # in-window adjustments so deposits/withdrawals don't show as vertical jumps.
+    chart_equity_clean = []
+    _cum_adj = Decimal("0")
+    for s in snapshots:
+        _cum_adj += adj_by_day.get(s.day, Decimal("0"))
+        chart_equity_clean.append(float(s.total_equity - _cum_adj))
     chart_wac_pnl = [float(s.daily_wac_realized_pnl) for s in snapshots]
     chart_net_profit = [float(s.net_profit_after_tax) for s in snapshots]
     chart_bank = [float(s.bank_balance) for s in snapshots]
@@ -122,6 +129,7 @@ def dashboard(request):
         "sum_net_profit": sum_net_profit,
         "sum_volume": sum_volume,
         "chart_equity_pnl_clean": json.dumps(chart_equity_pnl_clean),
+        "chart_equity_clean": json.dumps(chart_equity_clean),
         "account": account,
         "latest": latest,
         "today_snap": today_snap,
@@ -146,20 +154,8 @@ def dashboard(request):
 @login_required
 def net_profit(request):
     account = get_active_account(request.user)
-    period = request.GET.get("period", "month")
     today = timezone.localdate()
-
-    if period == "today":
-        date_from = today
-    elif period == "week":
-        date_from = today - timedelta(days=today.weekday())
-    elif period == "month":
-        date_from = today.replace(day=1)
-    else:
-        date_from = date.fromisoformat(request.GET.get("from", str(today.replace(day=1))))
-        date_to = date.fromisoformat(request.GET.get("to", str(today)))
-
-    date_to = today if period != "custom" else date_to
+    period, date_from, date_to = _resolve_range(request, "month", today)
 
     daily_rows = []
     totals = {
@@ -169,10 +165,10 @@ def net_profit(request):
 
     if account:
         snaps = DailySnapshot.objects.filter(
-            exchange_account=account,
-            day__gte=date_from,
-            day__lte=date_to,
+            exchange_account=account, day__lte=date_to
         ).order_by("day")
+        if date_from is not None:
+            snaps = snaps.filter(day__gte=date_from)
         for s in snaps:
             daily_rows.append(s)
             totals["gross"] += float(s.gross_realized_pnl)

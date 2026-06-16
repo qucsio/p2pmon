@@ -1,31 +1,35 @@
 {% extends "base.html" %}
 {% load humanize %}
-{% block title %}Daily Report{% endblock %}
+{% block title %}Дневной отчёт{% endblock %}
+{% block heading %}Дневной отчёт{% endblock %}
 {% block content %}
-<h1>Daily Report</h1>
+<div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
-<table class="table table-striped table-sm">
+<table class="table">
     <thead><tr>
-        <th>Day</th><th>Bank</th><th>Exchange</th><th>Equity</th>
-        <th>Equity PnL</th><th>WAC Realized</th><th>WAC Unrealized</th>
-        <th>Volume USDT</th><th>Net After Tax</th><th>WAC</th>
+        <th>День</th><th class="text-end">Банк</th><th class="text-end">Биржа</th><th class="text-end">Equity</th>
+        <th class="text-end">Equity PnL</th><th class="text-end">WAC Realized</th><th class="text-end">WAC Unrealized</th>
+        <th class="text-end">Объём USDT</th><th class="text-end">После налога</th><th class="text-end">WAC</th>
     </tr></thead>
     <tbody>
     {% for r in rows %}
     <tr>
-        <td>{{ r.day }}</td>
-        <td>{{ r.bank_balance|floatformat:2 }}</td>
-        <td>{{ r.exchange_balance|floatformat:4 }}</td>
-        <td>{{ r.total_equity|floatformat:2 }}</td>
-        <td>{{ r.daily_total_equity_pnl|floatformat:2 }}</td>
-        <td>{{ r.daily_wac_realized_pnl|floatformat:2 }}</td>
-        <td>{{ r.daily_wac_unrealized_pnl|floatformat:2 }}</td>
-        <td>{{ r.volume_usdt|floatformat:4 }}</td>
-        <td>{{ r.net_profit_after_tax|floatformat:2 }}</td>
-        <td>{{ r.wac_price|floatformat:2 }}</td>
+        <td class="num">{{ r.day|date:"d.m.Y" }}</td>
+        <td class="num text-end">{{ r.bank_balance|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.exchange_balance|floatformat:4 }}</td>
+        <td class="num text-end">{{ r.total_equity|floatformat:2 }}</td>
+        <td class="num text-end {% if r.daily_total_equity_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.daily_total_equity_pnl|floatformat:2 }}</td>
+        <td class="num text-end {% if r.daily_wac_realized_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.daily_wac_realized_pnl|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.daily_wac_unrealized_pnl|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.volume_usdt|floatformat:4 }}</td>
+        <td class="num text-end">{{ r.net_profit_after_tax|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.wac_price|floatformat:2 }}</td>
     </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="10">Нет данных</td></tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
 </div>
 {% endblock %}

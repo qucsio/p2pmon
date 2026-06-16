@@ -1,10 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Create Correction{% endblock %}
+{% block title %}Создать корректировку{% endblock %}
+{% block heading %}Создать корректировку «{{ account_type }}»?{% endblock %}
 {% block content %}
-<h1>Create {{ account_type }} correction?</h1>
-<p>Diff: {% if account_type == 'bank' %}{{ snapshot.bank_diff|floatformat:2 }} ₽{% else %}{{ snapshot.exchange_diff|floatformat:6 }} USDT{% endif %}</p>
-<form method="post">{% csrf_token %}
-    <button type="submit" class="btn btn-warning">Create correction adjustment</button>
-    <a href="{% url 'reconciliation:list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="panel" style="max-width:480px;">
+    <p style="color:var(--txt-2);">Расхождение: <b class="num">{% if account_type == 'bank' %}{{ snapshot.bank_diff|floatformat:2 }} ₽{% else %}{{ snapshot.exchange_diff|floatformat:6 }} USDT{% endif %}</b></p>
+    <form method="post" style="display:flex;gap:9px;margin-top:14px;">{% csrf_token %}
+        <button type="submit" class="btn-ghost warn">Создать корректировку</button>
+        <a href="{% url 'reconciliation:list' %}" class="btn-ghost">Отмена</a>
+    </form>
+</div>
 {% endblock %}

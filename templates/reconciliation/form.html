@@ -1,16 +1,21 @@
 {% extends "base.html" %}
-{% block title %}New Reconciliation{% endblock %}
+{% block title %}Новая сверка{% endblock %}
+{% block heading %}Новый снимок сверки{% endblock %}
 {% block content %}
-<h1>New Reconciliation Snapshot</h1>
-<p>Calculated: Bank {{ calculated_bank|floatformat:2 }} ₽ | Exchange {{ calculated_exchange|floatformat:6 }} USDT</p>
-<form method="post">{% csrf_token %}
-    {% for field in form %}
-    <div class="mb-3">
-        <label class="form-label">{{ field.label }}</label>
-        {{ field }}
-    </div>
-    {% endfor %}
-    <button type="submit" class="btn btn-primary">Save</button>
-    <a href="{% url 'reconciliation:list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="panel" style="max-width:560px;">
+    <div class="alert alert-info">Расчёт: банк <b class="num">{{ calculated_bank|floatformat:2 }} ₽</b> · биржа <b class="num">{{ calculated_exchange|floatformat:6 }} USDT</b></div>
+    <form method="post">{% csrf_token %}
+        {% for field in form %}
+        <div class="mb-3">
+            <label class="form-label" style="font-size:12.5px;color:var(--txt-2);">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}<div class="neg" style="font-size:12px;margin-top:4px;">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <div style="display:flex;gap:9px;margin-top:18px;">
+            <button type="submit" class="btn-accent">Сохранить</button>
+            <a href="{% url 'reconciliation:list' %}" class="btn-ghost">Отмена</a>
+        </div>
+    </form>
+</div>
 {% endblock %}

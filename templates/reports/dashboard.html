@@ -19,9 +19,9 @@
 <div class="section-label">Сводка за период</div>
 <div class="kpi-grid" style="margin-bottom:22px;">
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Total PnL (equity)</div>
-        <div class="val num" id="kpiPnl">{{ sum_equity_pnl|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">без корректировок: <b class="num">{{ sum_equity_pnl_clean|floatformat:0|intcomma }} ₽</b></div>
+        <div class="label">Total PnL · Δ equity за период</div>
+        <div class="val num {% if sum_equity_pnl >= 0 %}pos{% else %}neg{% endif %}" id="kpiPnl">{{ sum_equity_pnl|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">изменение капитала (без депозитов/выводов)</div>
     </div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Чистая прибыль (после налога)</div>
@@ -49,6 +49,7 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Realized WAC PnL</div>
         <div class="val num {% if today_snap.daily_wac_realized_pnl >= 0 %}pos{% else %}neg{% endif %}">{% if today_snap %}{{ today_snap.daily_wac_realized_pnl|floatformat:0|intcomma }} ₽{% else %}—{% endif %}</div>
+        <div class="sub">банк <b class="num">{% if latest %}{{ latest.bank_balance|floatformat:0|intcomma }} ₽{% endif %}</b> · биржа <b class="num">{% if latest %}{{ latest.exchange_balance|floatformat:2 }} USDT{% endif %}</b></div>
     </div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Net Profit (после налога)</div>
@@ -66,14 +67,7 @@
         <div class="panel">
             <div class="panel-head">
                 <div><p class="panel-sub">PnL</p><h3 class="panel-title">Total Equity PnL по дням</h3></div>
-                <div style="display:flex;gap:12px;align-items:center;">
-                    <label class="switch">
-                        <input type="checkbox" id="togglePnlClean">
-                        <span class="track"></span>
-                        Скрыть корректировки
-                    </label>
-                    <button class="btn-ghost" data-reset="chartEquityPnl">Сброс зума</button>
-                </div>
+                <button class="btn-ghost" data-reset="chartEquityPnl">Сброс зума</button>
             </div>
             <div class="chart-box"><canvas id="chartEquityPnl"></canvas></div>
         </div>
@@ -82,7 +76,14 @@
         <div class="panel">
             <div class="panel-head">
                 <div><p class="panel-sub">Капитал</p><h3 class="panel-title">Total Equity</h3></div>
-                <button class="btn-ghost" data-reset="chartEquity">Сброс зума</button>
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <label class="switch">
+                        <input type="checkbox" id="toggleEquityClean">
+                        <span class="track"></span>
+                        Скрыть корректировки
+                    </label>
+                    <button class="btn-ghost" data-reset="chartEquity">Сброс зума</button>
+                </div>
             </div>
             <div class="chart-box"><canvas id="chartEquity"></canvas></div>
         </div>
@@ -113,7 +114,8 @@
 <script>
 const labels = {{ chart_labels|safe }};
 const dataEquityPnl = {{ chart_equity_pnl|safe }};
-const dataEquityPnlClean = {{ chart_equity_pnl_clean|safe }};
+const dataEquity = {{ chart_equity|safe }};
+const dataEquityClean = {{ chart_equity_clean|safe }};
 const charts = {};
 
 const ACCENT = '#ff7a18', BLUE = '#3b9eff', GREEN = '#2ec27e', PURPLE = '#a78bfa';
@@ -176,11 +178,11 @@ document.querySelectorAll('[data-reset]').forEach(b=>{
     b.addEventListener('click', ()=>{ const c = charts[b.dataset.reset]; if(c) c.resetZoom(); });
 });
 
-// Toggle adjustment spikes on the equity-PnL chart
-const tgl = document.getElementById('togglePnlClean');
+// Toggle: hide capital-flow steps (deposits/withdrawals) on the Total Equity chart
+const tgl = document.getElementById('toggleEquityClean');
 if (tgl) tgl.addEventListener('change', ()=>{
-    const c = charts['chartEquityPnl']; if(!c) return;
-    c.data.datasets[0].data = tgl.checked ? dataEquityPnlClean : dataEquityPnl;
+    const c = charts['chartEquity']; if(!c) return;
+    c.data.datasets[0].data = tgl.checked ? dataEquityClean : dataEquity;
     c.update();
 });
 </script>
