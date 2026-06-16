@@ -1,27 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Login — P2P Monitor{% endblock %}
-{% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header"><h4>P2P Monitor</h4></div>
-            <div class="card-body">
-                <form method="post">{% csrf_token %}
-                    {% if form.errors %}
-                    <div class="alert alert-danger">Invalid credentials</div>
-                    {% endif %}
-                    <div class="mb-3">
-                        <label class="form-label">Username</label>
-                        <input type="text" name="username" class="form-control" required autofocus>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" name="password" class="form-control" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">Login</button>
-                </form>
-            </div>
+{% block title %}Вход — P2P Monitor{% endblock %}
+{% block content_anon %}
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div class="panel" style="width:100%;max-width:380px;padding:30px;">
+        <div class="sidebar-brand" style="padding:0 0 22px;justify-content:center;">
+            <span class="logo">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-7 4 4 6-9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            P2P Monitor
         </div>
+        <form method="post">{% csrf_token %}
+            {% if form.errors %}
+            <div class="alert alert-danger py-2">Неверные данные для входа</div>
+            {% endif %}
+            <div class="mb-3">
+                <label class="form-label" style="font-size:12.5px;color:var(--txt-2);">Имя пользователя</label>
+                <input type="text" name="username" class="form-control" required autofocus>
+            </div>
+            <div class="mb-4">
+                <label class="form-label" style="font-size:12.5px;color:var(--txt-2);">Пароль</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn w-100" style="background:var(--accent);border:0;color:#fff;font-weight:600;padding:9px;">Войти</button>
+        </form>
     </div>
 </div>
 {% endblock %}

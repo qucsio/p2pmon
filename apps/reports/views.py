@@ -1,37 +1,60 @@
 import json
+from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
+from django.db.models.functions import TruncDate
 from django.shortcuts import render
 from django.utils import timezone
 
 from apps.common.helpers import get_active_account
 from apps.exchange.models import SyncLog
 from apps.investors.models import TaxSetting
-from apps.ledger.models import DailySnapshot
+from apps.ledger.models import DailySnapshot, LedgerAdjustment
+from apps.orders.models import P2POrder
 from apps.reconciliation.models import BalanceSnapshot
+
+
+def _resolve_range(request, default_period, today):
+    """Resolve a flexible reporting range from query params.
+
+    Supports: today, 7, 30, 90, week, month, year, all, custom.
+    Returns (period, date_from, date_to). date_from is None for "all time".
+    """
+    period = request.GET.get("period", default_period)
+    date_to = today
+
+    if period == "custom":
+        try:
+            date_from = date.fromisoformat(request.GET.get("from"))
+            date_to = date.fromisoformat(request.GET.get("to"))
+        except (TypeError, ValueError):
+            period, date_from = "30", today - timedelta(days=30)
+    elif period == "today":
+        date_from = today
+    elif period == "week":
+        date_from = today - timedelta(days=today.weekday())
+    elif period == "month":
+        date_from = today.replace(day=1)
+    elif period == "year":
+        date_from = today.replace(month=1, day=1)
+    elif period == "all":
+        date_from = None
+    elif period in ("7", "30", "90"):
+        date_from = today - timedelta(days=int(period))
+    else:
+        period, date_from = "30", today - timedelta(days=30)
+
+    return period, date_from, date_to
 
 
 @login_required
 def dashboard(request):
     account = get_active_account(request.user)
-    period = request.GET.get("period", "30")
     today = timezone.localdate()
-
-    if period == "today":
-        date_from = today
-    elif period == "7":
-        date_from = today - timedelta(days=7)
-    elif period == "month":
-        date_from = today.replace(day=1)
-    elif period == "custom":
-        date_from = date.fromisoformat(request.GET.get("from", str(today - timedelta(days=30))))
-        date_to = date.fromisoformat(request.GET.get("to", str(today)))
-    else:
-        date_from = today - timedelta(days=30)
-
-    date_to = today if period != "custom" else date_to
+    period, date_from, date_to = _resolve_range(request, "30", today)
 
     snapshots = []
     latest = None
@@ -39,14 +62,32 @@ def dashboard(request):
     last_sync = None
     balance_warning = False
 
+    adj_by_day = {}
     if account:
-        snapshots = list(
-            DailySnapshot.objects.filter(
-                exchange_account=account,
-                day__gte=date_from,
-                day__lte=date_to,
-            ).order_by("day")
+        snap_qs = DailySnapshot.objects.filter(
+            exchange_account=account, day__lte=date_to
         )
+        if date_from is not None:
+            snap_qs = snap_qs.filter(day__gte=date_from)
+        snapshots = list(snap_qs.order_by("day"))
+
+        # Per-day signed adjustment value in RUB (used to strip deposit/withdrawal
+        # spikes from the equity-delta PnL curve).
+        adj_qs = LedgerAdjustment.objects.filter(
+            exchange_account=account, is_deleted=False, include_in_ledger=True,
+            effective_at__date__lte=date_to,
+        )
+        if date_from is not None:
+            adj_qs = adj_qs.filter(effective_at__date__gte=date_from)
+        price_by_day = {s.day: s.last_price for s in snapshots}
+        for adj in adj_qs:
+            d = timezone.localtime(adj.effective_at).date()
+            rub = adj.signed_amount_rub()
+            usdt = adj.signed_amount_usdt()
+            if usdt:
+                rub += usdt * price_by_day.get(d, Decimal("0"))
+            adj_by_day[d] = adj_by_day.get(d, Decimal("0")) + rub
+
         latest = DailySnapshot.objects.filter(exchange_account=account).order_by("-day").first()
         today_snap = DailySnapshot.objects.filter(exchange_account=account, day=today).first()
         last_sync = SyncLog.objects.filter(exchange_account=account).first()
@@ -57,6 +98,11 @@ def dashboard(request):
     chart_labels = [s.day.isoformat() for s in snapshots]
     chart_equity = [float(s.total_equity) for s in snapshots]
     chart_equity_pnl = [float(s.daily_total_equity_pnl) for s in snapshots]
+    # Same curve with deposit/withdrawal spikes removed (trading PnL only).
+    chart_equity_pnl_clean = [
+        float(s.daily_total_equity_pnl - adj_by_day.get(s.day, Decimal("0")))
+        for s in snapshots
+    ]
     chart_wac_pnl = [float(s.daily_wac_realized_pnl) for s in snapshots]
     chart_net_profit = [float(s.net_profit_after_tax) for s in snapshots]
     chart_bank = [float(s.bank_balance) for s in snapshots]
@@ -64,7 +110,18 @@ def dashboard(request):
     chart_wac_price = [float(s.wac_price) for s in snapshots]
     chart_last_price = [float(s.last_price) for s in snapshots]
 
+    # Period totals for the KPI strip.
+    sum_equity_pnl = sum((s.daily_total_equity_pnl for s in snapshots), Decimal("0"))
+    sum_equity_pnl_clean = sum_equity_pnl - sum(adj_by_day.values(), Decimal("0"))
+    sum_net_profit = sum((s.net_profit_after_tax for s in snapshots), Decimal("0"))
+    sum_volume = sum((s.volume_rub for s in snapshots), Decimal("0"))
+
     context = {
+        "sum_equity_pnl": sum_equity_pnl,
+        "sum_equity_pnl_clean": sum_equity_pnl_clean,
+        "sum_net_profit": sum_net_profit,
+        "sum_volume": sum_volume,
+        "chart_equity_pnl_clean": json.dumps(chart_equity_pnl_clean),
         "account": account,
         "latest": latest,
         "today_snap": today_snap,
@@ -131,6 +188,58 @@ def net_profit(request):
         "totals": totals,
         "date_from": date_from,
         "date_to": date_to,
+    })
+
+
+@login_required
+def volumes(request):
+    account = get_active_account(request.user)
+    today = timezone.localdate()
+    period, date_from, date_to = _resolve_range(request, "year", today)
+
+    # Daily buy / sell volume in RUB computed live from completed orders.
+    buy = defaultdict(float)
+    sell = defaultdict(float)
+    if account:
+        order_qs = P2POrder.objects.filter(
+            exchange_account=account,
+            include_in_ledger=True,
+            created_at_moscow__date__lte=date_to,
+        )
+        if date_from is not None:
+            order_qs = order_qs.filter(created_at_moscow__date__gte=date_from)
+        rows = (
+            order_qs.annotate(d=TruncDate("created_at_moscow"))
+            .values("d", "side")
+            .annotate(total=Sum("amount_rub"))
+        )
+        for r in rows:
+            bucket = buy if r["side"] == P2POrder.SIDE_BUY else sell
+            bucket[r["d"]] += float(r["total"] or 0)
+
+    days = sorted(set(buy) | set(sell))
+    cal = []
+    total_buy = total_sell = 0.0
+    for d in days:
+        b, s = buy.get(d, 0.0), sell.get(d, 0.0)
+        total_buy += b
+        total_sell += s
+        cal.append({"date": d.isoformat(), "buy": b, "sell": s, "total": b + s})
+
+    total_all = total_buy + total_sell
+    active_days = len([c for c in cal if c["total"] > 0])
+
+    return render(request, "reports/volumes.html", {
+        "account": account,
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "cal_json": json.dumps(cal),
+        "total_buy": total_buy,
+        "total_sell": total_sell,
+        "total_all": total_all,
+        "active_days": active_days,
+        "avg_per_day": (total_all / active_days) if active_days else 0,
     })
 
 

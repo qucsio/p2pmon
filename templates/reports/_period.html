@@ -1,0 +1,18 @@
+{% comment %}Flexible period selector. Expects `period`, `date_from`, `date_to` in context.{% endcomment %}
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <div class="seg">
+        <a href="?period=today" class="{% if period == 'today' %}active{% endif %}">Сегодня</a>
+        <a href="?period=7" class="{% if period == '7' %}active{% endif %}">7д</a>
+        <a href="?period=30" class="{% if period == '30' %}active{% endif %}">30д</a>
+        <a href="?period=month" class="{% if period == 'month' %}active{% endif %}">Месяц</a>
+        <a href="?period=year" class="{% if period == 'year' %}active{% endif %}">Год</a>
+        <a href="?period=all" class="{% if period == 'all' %}active{% endif %}">Всё время</a>
+    </div>
+    <form method="get" style="display:flex;gap:6px;align-items:center;">
+        <input type="hidden" name="period" value="custom">
+        <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}">
+        <span style="color:var(--txt-3);">—</span>
+        <input type="date" name="to" value="{{ date_to|date:'Y-m-d' }}">
+        <button type="submit" class="btn-ghost {% if period == 'custom' %}active{% endif %}">Применить</button>
+    </form>
+</div>

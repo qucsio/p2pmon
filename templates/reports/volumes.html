@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Объёмы{% endblock %}
+{% block heading %}Объёмы{% endblock %}
+{% block content %}
+
+{% if not account %}
+<div class="alert alert-warning">Нет активного аккаунта биржи.</div>
+{% else %}
+
+<div style="margin-bottom:20px;">{% include "reports/_period.html" %}</div>
+
+<div class="section-label">Сводка оборота</div>
+<div class="kpi-grid" style="margin-bottom:22px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label"><span class="dot" style="background:var(--accent)"></span> Общий объём</div>
+        <div class="val num">{{ total_all|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">за {{ active_days }} активных дн.</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label"><span class="dot" style="background:var(--green)"></span> Покупка</div>
+        <div class="val num">{{ total_buy|floatformat:0|intcomma }} ₽</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label"><span class="dot" style="background:var(--blue)"></span> Продажа</div>
+        <div class="val num">{{ total_sell|floatformat:0|intcomma }} ₽</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Средний объём в день</div>
+        <div class="val num">{{ avg_per_day|floatformat:0|intcomma }} ₽</div>
+    </div>
+</div>
+
+<div class="panel" style="margin-bottom:22px;">
+    <div class="panel-head">
+        <div><p class="panel-sub">Календарь</p><h3 class="panel-title">Дневной объём в рублях</h3></div>
+        <div class="seg" id="modeSeg">
+            <button data-mode="total" class="active">Общий</button>
+            <button data-mode="sell">Продажа</button>
+            <button data-mode="buy">Покупка</button>
+        </div>
+    </div>
+    <div style="overflow-x:auto;padding-bottom:6px;">
+        <div id="heatmap" class="heatmap"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--txt-3);font-size:11px;">
+        Меньше
+        <span class="heat-cell" style="background:#161a22;"></span>
+        <span class="heat-cell" id="lg1"></span>
+        <span class="heat-cell" id="lg2"></span>
+        <span class="heat-cell" id="lg3"></span>
+        <span class="heat-cell" id="lg4"></span>
+        Больше
+        <span id="hoverInfo" style="margin-left:auto;color:var(--txt-2);"></span>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-head"><div><p class="panel-sub">Динамика</p><h3 class="panel-title">Объём покупка / продажа</h3></div>
+        <button class="btn-ghost" data-reset="volChart">Сброс зума</button>
+    </div>
+    <canvas id="volChart" height="90"></canvas>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const cal = {{ cal_json|safe }};
+const byDate = {}; cal.forEach(c => byDate[c.date] = c);
+let mode = 'total';
+const ACCENT = [255,122,24], GREEN=[46,194,126], BLUE=[59,158,255];
+function colorFor(mode){ return mode==='buy'?GREEN : mode==='sell'?BLUE : ACCENT; }
+
+function maxFor(mode){ return Math.max(1, ...cal.map(c=>c[mode])); }
+function shade(v, mx, rgb){
+    if(!v) return '#161a22';
+    const t = 0.18 + 0.82*Math.min(1, Math.sqrt(v/mx));
+    return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${t.toFixed(3)})`;
+}
+
+function buildHeatmap(){
+    const wrap = document.getElementById('heatmap');
+    wrap.innerHTML = '';
+    if(!cal.length){ wrap.innerHTML = '<div style="color:var(--txt-3)">Нет данных</div>'; return; }
+    const rgb = colorFor(mode), mx = maxFor(mode);
+    // Fill from first date's week start to today, aligning weekday rows.
+    const start = new Date(cal[0].date), end = new Date(cal[cal.length-1].date);
+    const cur = new Date(start);
+    cur.setDate(cur.getDate() - ((cur.getDay()+6)%7)); // back to Monday
+    while(cur <= end){
+        const iso = cur.toISOString().slice(0,10);
+        const c = byDate[iso];
+        const v = c ? c[mode] : 0;
+        const cell = document.createElement('div');
+        cell.className = 'heat-cell';
+        cell.style.background = shade(v, mx, rgb);
+        cell.title = iso;
+        cell.onmouseenter = ()=>{ document.getElementById('hoverInfo').textContent =
+            `${iso}: ${Math.round(v).toLocaleString('ru-RU')} ₽`; };
+        wrap.appendChild(cell);
+        cur.setDate(cur.getDate()+1);
+    }
+    const rgbS = `rgb(${rgb.join(',')})`;
+    [['lg1',.25],['lg2',.45],['lg3',.7],['lg4',1]].forEach(([id,t])=>{
+        document.getElementById(id).style.background = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${t})`;
+    });
+}
+buildHeatmap();
+
+document.querySelectorAll('#modeSeg button').forEach(b=>{
+    b.onclick = ()=>{
+        document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.remove('active'));
+        b.classList.add('active'); mode = b.dataset.mode; buildHeatmap();
+    };
+});
+
+// Stacked bar chart
+const charts = {};
+const el = document.getElementById('volChart');
+if (el && cal.length){
+    charts['volChart'] = new Chart(el, {
+        type:'bar',
+        data:{ labels: cal.map(c=>c.date), datasets:[
+            { label:'Покупка', data: cal.map(c=>c.buy), backgroundColor:'rgba(46,194,126,.8)', stack:'v', borderRadius:2 },
+            { label:'Продажа', data: cal.map(c=>c.sell), backgroundColor:'rgba(59,158,255,.8)', stack:'v', borderRadius:2 },
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false,
+            interaction:{ mode:'index', intersect:false },
+            plugins:{
+                legend:{ display:true, labels:{ boxWidth:10, boxHeight:10, usePointStyle:true } },
+                tooltip:{ backgroundColor:'#13161d', borderColor:'#222733', borderWidth:1, cornerRadius:9,
+                    callbacks:{ label:c=>` ${c.dataset.label}: ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽` } },
+                zoom:{ zoom:{ drag:{ enabled:true, backgroundColor:'rgba(255,122,24,.12)' }, mode:'x' }, pan:{ enabled:true, mode:'x', modifierKey:'shift' } }
+            },
+            scales:{ x:{ stacked:true, grid:{display:false}, ticks:{maxTicksLimit:10,maxRotation:0} },
+                     y:{ stacked:true, grid:{color:'rgba(255,255,255,.045)'}, ticks:{callback:v=>v.toLocaleString('ru-RU')} } }
+        }
+    });
+}
+document.querySelectorAll('[data-reset]').forEach(b=>{
+    b.addEventListener('click',()=>{ const c=charts[b.dataset.reset]; if(c) c.resetZoom(); });
+});
+</script>
+{% endblock %}

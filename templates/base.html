@@ -1,57 +1,286 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}P2P Monitor{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+    :root{
+        --bg:#0a0c10; --bg-2:#0e1116; --panel:#13161d; --panel-2:#171b23;
+        --panel-hover:#1b1f29; --border:#222733; --border-soft:#1a1e27;
+        --txt:#e6e9ef; --txt-2:#9aa3b2; --txt-3:#646d7e;
+        --accent:#ff7a18; --accent-soft:rgba(255,122,24,.14);
+        --blue:#3b9eff; --blue-soft:rgba(59,158,255,.14);
+        --green:#2ec27e; --red:#f0506e; --yellow:#f5b948;
+        --radius:14px; --radius-sm:10px;
+        --sidebar-w:236px;
+    }
+    *{scrollbar-width:thin;scrollbar-color:#2a3140 transparent;}
+    ::-webkit-scrollbar{width:9px;height:9px;}
+    ::-webkit-scrollbar-thumb{background:#2a3140;border-radius:6px;}
+    ::-webkit-scrollbar-thumb:hover{background:#3a4456;}
+    body{
+        background:var(--bg); color:var(--txt);
+        font-family:'Inter',system-ui,-apple-system,sans-serif;
+        font-size:14px; -webkit-font-smoothing:antialiased;
+    }
+    .mono,.num{font-family:'JetBrains Mono','Inter',monospace;font-feature-settings:"tnum";letter-spacing:-.02em;}
+
+    /* ---------- Layout shell ---------- */
+    .app-shell{display:flex;min-height:100vh;}
+    .sidebar{
+        width:var(--sidebar-w); flex:0 0 var(--sidebar-w);
+        background:var(--bg-2); border-right:1px solid var(--border-soft);
+        position:fixed; top:0; left:0; bottom:0; z-index:1040;
+        display:flex; flex-direction:column; padding:18px 14px;
+        transition:transform .2s ease;
+    }
+    .sidebar-brand{
+        display:flex; align-items:center; gap:10px;
+        padding:6px 8px 18px; font-weight:700; font-size:17px; letter-spacing:-.01em;
+    }
+    .sidebar-brand .logo{
+        width:26px;height:26px;border-radius:7px;
+        background:linear-gradient(135deg,var(--accent),#ff5a3c);
+        display:flex;align-items:center;justify-content:center;flex:0 0 26px;
+        box-shadow:0 4px 14px rgba(255,90,60,.4);
+    }
+    .nav-group-label{
+        font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+        color:var(--txt-3); padding:14px 10px 6px;
+    }
+    .side-link{
+        display:flex;align-items:center;gap:11px;
+        padding:9px 11px;margin:1px 0;border-radius:var(--radius-sm);
+        color:var(--txt-2);text-decoration:none;font-weight:500;font-size:13.5px;
+        transition:background .12s,color .12s;
+    }
+    .side-link svg{width:17px;height:17px;flex:0 0 17px;opacity:.85;}
+    .side-link:hover{background:var(--panel-hover);color:var(--txt);}
+    .side-link.active{background:var(--accent-soft);color:#ffb27a;}
+    .side-link.active svg{opacity:1;}
+    .sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border-soft);}
+    .user-chip{display:flex;align-items:center;gap:10px;padding:8px 10px;}
+    .user-chip .av{width:30px;height:30px;border-radius:50%;background:var(--panel-2);
+        display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--accent);font-size:13px;}
+    .user-chip .meta{line-height:1.25;}
+    .user-chip .meta b{font-size:13px;}
+    .user-chip .meta span{font-size:11px;color:var(--txt-3);}
+
+    .main{flex:1;margin-left:var(--sidebar-w);min-width:0;display:flex;flex-direction:column;}
+    .topbar{
+        height:58px;display:flex;align-items:center;gap:14px;
+        padding:0 26px;border-bottom:1px solid var(--border-soft);
+        position:sticky;top:0;background:rgba(10,12,16,.82);backdrop-filter:blur(12px);z-index:1030;
+    }
+    .topbar h1{font-size:16px;font-weight:600;margin:0;}
+    .content{padding:22px 26px 40px;}
+    .burger{display:none;background:none;border:0;color:var(--txt);font-size:22px;line-height:1;cursor:pointer;}
+
+    /* ---------- Cards / panels ---------- */
+    .card,.panel{
+        background:var(--panel);border:1px solid var(--border-soft);
+        border-radius:var(--radius);color:var(--txt);
+    }
+    .panel{padding:18px;}
+    .panel-pad-0{padding:0;}
+    .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px;flex-wrap:wrap;}
+    .panel-title{font-size:14px;font-weight:600;margin:0;}
+    .panel-sub{font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.08em;margin:0;}
+
+    .section-label{font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-3);margin:6px 2px 12px;}
+
+    /* KPI */
+    .kpi-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));}
+    .kpi{
+        background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);
+        padding:16px 17px;position:relative;overflow:hidden;transition:border-color .15s,transform .15s;
+    }
+    .kpi:hover{border-color:var(--border);transform:translateY(-1px);}
+    .kpi .label{display:flex;align-items:center;gap:7px;color:var(--txt-3);font-size:11.5px;font-weight:500;margin-bottom:10px;}
+    .kpi .label svg{width:14px;height:14px;}
+    .kpi .val{font-size:25px;font-weight:600;line-height:1;}
+    .kpi .sub{margin-top:8px;font-size:11.5px;color:var(--txt-3);}
+    .kpi .sub b{color:var(--txt-2);font-weight:600;}
+    .pos{color:var(--green);} .neg{color:var(--red);}
+    .accent-bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.0;transition:opacity .15s;}
+    .kpi:hover .accent-bar{opacity:.9;}
+
+    /* segmented control / period buttons */
+    .seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--border-soft);border-radius:10px;padding:3px;gap:2px;}
+    .seg button,.seg a{
+        border:0;background:none;color:var(--txt-2);font-size:12.5px;font-weight:500;
+        padding:5px 12px;border-radius:7px;cursor:pointer;text-decoration:none;line-height:1.4;white-space:nowrap;
+    }
+    .seg button:hover,.seg a:hover{color:var(--txt);}
+    .seg button.active,.seg a.active{background:var(--panel-2);color:var(--txt);box-shadow:0 1px 4px rgba(0,0,0,.3);}
+
+    .btn-ghost{
+        background:var(--panel-2);border:1px solid var(--border);color:var(--txt-2);
+        border-radius:9px;padding:6px 12px;font-size:12.5px;font-weight:500;cursor:pointer;
+        display:inline-flex;align-items:center;gap:6px;text-decoration:none;
+    }
+    .btn-ghost:hover{color:var(--txt);border-color:#333d4d;}
+    .btn-ghost svg{width:14px;height:14px;}
+
+    /* toggle switch */
+    .switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;color:var(--txt-2);user-select:none;}
+    .switch input{display:none;}
+    .switch .track{width:36px;height:20px;border-radius:20px;background:#2a3140;position:relative;transition:background .15s;flex:0 0 36px;}
+    .switch .track::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2.5px;left:2.5px;transition:transform .15s;}
+    .switch input:checked + .track{background:var(--accent);}
+    .switch input:checked + .track::after{transform:translateX(16px);}
+
+    /* date inputs */
+    input[type=date]{background:var(--panel-2);border:1px solid var(--border);color:var(--txt);border-radius:9px;padding:6px 10px;font-size:12.5px;}
+    input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.7);}
+
+    /* tables */
+    table{color:var(--txt);}
+    .table{--bs-table-bg:transparent;--bs-table-color:var(--txt);--bs-table-border-color:var(--border-soft);}
+    .table thead th{color:var(--txt-3);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;border-color:var(--border-soft);}
+    .table td{border-color:var(--border-soft);}
+
+    /* form controls (bootstrap dark refine) */
+    .form-control,.form-select{background:var(--panel-2);border-color:var(--border);color:var(--txt);}
+    .form-control:focus,.form-select:focus{background:var(--panel-2);color:var(--txt);border-color:var(--accent);box-shadow:0 0 0 .2rem var(--accent-soft);}
+
+    /* alerts */
+    .alert{border:1px solid var(--border);border-radius:var(--radius-sm);}
+
+    /* calendar heatmap */
+    .heatmap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:4px;}
+    .heat-cell{width:15px;height:15px;border-radius:3px;background:#161a22;cursor:pointer;transition:transform .1s;}
+    .heat-cell:hover{transform:scale(1.25);outline:1px solid var(--txt-2);}
+
+    /* badges */
+    .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+    .pill.green{background:rgba(46,194,126,.14);color:var(--green);}
+    .pill.red{background:rgba(240,80,110,.14);color:var(--red);}
+    .pill.gray{background:var(--panel-2);color:var(--txt-3);}
+    .dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+
+    @media(max-width:900px){
+        .sidebar{transform:translateX(-100%);}
+        .sidebar.open{transform:translateX(0);}
+        .main{margin-left:0;}
+        .burger{display:block;}
+    }
+    </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body>
 {% if user.is_authenticated %}
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="{% url 'reports:dashboard' %}">P2P Monitor</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="nav">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item"><a class="nav-link" href="{% url 'reports:dashboard' %}">Dashboard</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'orders:list' %}">Orders</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'ledger:adjustment_list' %}">Adjustments</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'reports:net_profit' %}">Net Profit</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'investors:list' %}">Investors</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'reconciliation:list' %}">Reconciliation</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'reports:daily_report' %}">Daily Report</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'reports:weekly_report' %}">Weekly Report</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'exchange:sync_logs' %}">Sync</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'exports:orders' %}">Export Excel</a></li>
-            </ul>
-            <span class="navbar-text text-light me-3">{{ user.username }}</span>
-            <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}
-                <button class="btn btn-outline-light btn-sm" type="submit">Logout</button>
-            </form>
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <span class="logo">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-7 4 4 6-9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            P2P Monitor
+        </div>
+        <nav>
+            <div class="nav-group-label">Управление</div>
+            {% url 'reports:dashboard' as u_dash %}
+            {% url 'reports:volumes' as u_vol %}
+            {% url 'orders:list' as u_ord %}
+            {% url 'ledger:adjustment_list' as u_adj %}
+            {% url 'reports:net_profit' as u_net %}
+            {% url 'investors:list' as u_inv %}
+            {% url 'reconciliation:list' as u_rec %}
+            <a class="side-link {% if request.path == u_dash %}active{% endif %}" href="{{ u_dash }}">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
+                Дашборд</a>
+            <a class="side-link {% if request.path == u_vol %}active{% endif %}" href="{{ u_vol }}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5M4 19h16M8 19v-6M12 19v-9M16 19v-4M20 19V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Объёмы</a>
+            <a class="side-link {% if u_ord in request.path %}active{% endif %}" href="{{ u_ord }}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Ордера</a>
+            <a class="side-link {% if u_adj in request.path %}active{% endif %}" href="{{ u_adj }}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6 4v16M18 4v16M3 9h6M15 15h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="6" cy="9" r="2.4" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="15" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg>
+                Корректировки</a>
+            <a class="side-link {% if u_net in request.path %}active{% endif %}" href="{{ u_net }}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Чистая прибыль</a>
+            <a class="side-link {% if u_inv in request.path %}active{% endif %}" href="{{ u_inv }}">
+                <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 20a5.5 5.5 0 0111 0M16 5.2a3.2 3.2 0 010 5.6M17.5 14.3A5.5 5.5 0 0120.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Инвесторы</a>
+            <a class="side-link {% if u_rec in request.path %}active{% endif %}" href="{{ u_rec }}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Сверка</a>
+
+            <div class="nav-group-label">Отчёты</div>
+            <a class="side-link {% if 'daily' in request.path %}active{% endif %}" href="{% url 'reports:daily_report' %}">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9h16M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Дневной отчёт</a>
+            <a class="side-link {% if 'weekly' in request.path %}active{% endif %}" href="{% url 'reports:weekly_report' %}">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9h16" stroke="currentColor" stroke-width="1.8"/></svg>
+                Недельный отчёт</a>
+            <a class="side-link {% if 'sync' in request.path %}active{% endif %}" href="{% url 'exchange:sync_logs' %}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Синхронизация</a>
+            <a class="side-link" href="{% url 'exports:orders' %}">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Экспорт Excel</a>
+        </nav>
+        <div class="sidebar-foot">
+            <div class="user-chip">
+                <span class="av">{{ user.username|first|upper }}</span>
+                <div class="meta">
+                    <b>{{ user.username }}</b><br><span>Администратор</span>
+                </div>
+                <form method="post" action="{% url 'accounts:logout' %}" class="ms-auto">{% csrf_token %}
+                    <button type="submit" class="btn-ghost" style="padding:6px 8px;" title="Выйти">
+                        <svg viewBox="0 0 24 24" fill="none" style="width:15px;height:15px;"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="burger" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+            <h1>{% block heading %}{% endblock %}</h1>
+            {% block topbar_extra %}{% endblock %}
+        </div>
+        <div class="content">
+            {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% block content %}{% endblock %}
         </div>
     </div>
-</nav>
+</div>
+{% else %}
+{% if messages %}{% for message in messages %}
+<div class="alert alert-{{ message.tags }}">{{ message }}</div>
+{% endfor %}{% endif %}
+{% block content_anon %}{% endblock %}
 {% endif %}
 
-<div class="container-fluid px-4">
-    {% if messages %}
-    {% for message in messages %}
-    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    {% endfor %}
-    {% endif %}
-    {% block content %}{% endblock %}
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+if (window.Chart) {
+    Chart.defaults.color = '#9aa3b2';
+    Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.borderColor = 'rgba(255,255,255,.05)';
+}
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

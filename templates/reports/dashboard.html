@@ -1,72 +1,110 @@
 {% extends "base.html" %}
 {% load humanize %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Дашборд{% endblock %}
+{% block heading %}Дашборд{% endblock %}
 {% block content %}
-<h1 class="mb-4">Dashboard</h1>
 
 {% if not account %}
 <div class="alert alert-warning">
-    No active exchange account. <a href="/admin/exchange/exchangeaccount/add/">Add one in Admin</a>.
+    Нет активного аккаунта биржи. <a href="/admin/exchange/exchangeaccount/add/">Добавьте в админке</a>.
 </div>
 {% else %}
 
-<div class="mb-3">
-    <form method="get" class="row g-2 align-items-end">
-        <div class="col-auto">
-            <select name="period" class="form-select" onchange="this.form.submit()">
-                <option value="today" {% if period == "today" %}selected{% endif %}>Today</option>
-                <option value="7" {% if period == "7" %}selected{% endif %}>7 days</option>
-                <option value="30" {% if period == "30" %}selected{% endif %}>30 days</option>
-                <option value="month" {% if period == "month" %}selected{% endif %}>This month</option>
-            </select>
-        </div>
-    </form>
-</div>
-
 {% if balance_warning %}
-<div class="alert alert-danger">Balance diff detected in last reconciliation!</div>
+<div class="alert alert-danger">Обнаружено расхождение баланса в последней сверке!</div>
 {% endif %}
 
-<div class="row g-3 mb-4">
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Total Equity</div>
-        <div class="fs-4">{% if latest %}{{ latest.total_equity|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Bank Balance</div>
-        <div class="fs-4">{% if latest %}{{ latest.bank_balance|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Exchange Balance</div>
-        <div class="fs-4">{% if latest %}{{ latest.exchange_balance|floatformat:4 }} USDT{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">WAC / Last Price</div>
-        <div class="fs-4">{% if latest %}{{ latest.wac_price|floatformat:2 }} / {{ latest.last_price|floatformat:2 }}{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Daily Total Equity PnL</div>
-        <div class="fs-4">{% if today_snap %}{{ today_snap.daily_total_equity_pnl|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Daily Realized WAC PnL</div>
-        <div class="fs-4">{% if today_snap %}{{ today_snap.daily_wac_realized_pnl|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Net Profit After Tax (today)</div>
-        <div class="fs-4">{% if today_snap %}{{ today_snap.net_profit_after_tax|floatformat:2|intcomma }} ₽{% else %}—{% endif %}</div>
-    </div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body">
-        <div class="text-muted small">Last Sync</div>
-        <div class="fs-6">{% if last_sync %}{{ last_sync.status }} — {{ last_sync.started_at|date:"Y-m-d H:i" }}{% else %}Never{% endif %}</div>
-    </div></div></div>
+<div style="margin-bottom:20px;">{% include "reports/_period.html" %}</div>
+
+<div class="section-label">Сводка за период</div>
+<div class="kpi-grid" style="margin-bottom:22px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Total PnL (equity)</div>
+        <div class="val num" id="kpiPnl">{{ sum_equity_pnl|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">без корректировок: <b class="num">{{ sum_equity_pnl_clean|floatformat:0|intcomma }} ₽</b></div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Чистая прибыль (после налога)</div>
+        <div class="val num {% if sum_net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ sum_net_profit|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">за выбранный период</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Объём торгов</div>
+        <div class="val num">{{ sum_volume|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">сумма оборота</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Total Equity</div>
+        <div class="val num">{% if latest %}{{ latest.total_equity|floatformat:0|intcomma }} ₽{% else %}—{% endif %}</div>
+        <div class="sub">банк <b class="num">{% if latest %}{{ latest.bank_balance|floatformat:0|intcomma }} ₽{% endif %}</b> · биржа <b class="num">{% if latest %}{{ latest.exchange_balance|floatformat:2 }} USDT{% endif %}</b></div>
+    </div>
+</div>
+
+<div class="section-label">Сегодня</div>
+<div class="kpi-grid" style="margin-bottom:24px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Total Equity PnL</div>
+        <div class="val num {% if today_snap.daily_total_equity_pnl >= 0 %}pos{% else %}neg{% endif %}">{% if today_snap %}{{ today_snap.daily_total_equity_pnl|floatformat:0|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Realized WAC PnL</div>
+        <div class="val num {% if today_snap.daily_wac_realized_pnl >= 0 %}pos{% else %}neg{% endif %}">{% if today_snap %}{{ today_snap.daily_wac_realized_pnl|floatformat:0|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Net Profit (после налога)</div>
+        <div class="val num">{% if today_snap %}{{ today_snap.net_profit_after_tax|floatformat:0|intcomma }} ₽{% else %}—{% endif %}</div>
+    </div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">WAC / Последняя цена</div>
+        <div class="val num">{% if latest %}{{ latest.wac_price|floatformat:2 }} <span style="color:var(--txt-3);">/</span> {{ latest.last_price|floatformat:2 }}{% else %}—{% endif %}</div>
+        <div class="sub">{% if last_sync %}синхр.: {{ last_sync.status }} · {{ last_sync.started_at|date:"d.m H:i" }}{% else %}нет синхронизации{% endif %}</div>
+    </div>
 </div>
 
 <div class="row g-3">
-    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartEquity"></canvas></div></div></div>
-    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartEquityPnl"></canvas></div></div></div>
-    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartWacPnl"></canvas></div></div></div>
-    <div class="col-md-6"><div class="card"><div class="card-body"><canvas id="chartNetProfit"></canvas></div></div></div>
+    <div class="col-xl-6">
+        <div class="panel">
+            <div class="panel-head">
+                <div><p class="panel-sub">PnL</p><h3 class="panel-title">Total Equity PnL по дням</h3></div>
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <label class="switch">
+                        <input type="checkbox" id="togglePnlClean">
+                        <span class="track"></span>
+                        Скрыть корректировки
+                    </label>
+                    <button class="btn-ghost" data-reset="chartEquityPnl">Сброс зума</button>
+                </div>
+            </div>
+            <canvas id="chartEquityPnl" height="120"></canvas>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="panel">
+            <div class="panel-head">
+                <div><p class="panel-sub">Капитал</p><h3 class="panel-title">Total Equity</h3></div>
+                <button class="btn-ghost" data-reset="chartEquity">Сброс зума</button>
+            </div>
+            <canvas id="chartEquity" height="120"></canvas>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="panel">
+            <div class="panel-head">
+                <div><p class="panel-sub">PnL</p><h3 class="panel-title">Realized WAC PnL</h3></div>
+                <button class="btn-ghost" data-reset="chartWacPnl">Сброс зума</button>
+            </div>
+            <canvas id="chartWacPnl" height="120"></canvas>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="panel">
+            <div class="panel-head">
+                <div><p class="panel-sub">Прибыль</p><h3 class="panel-title">Net Profit (после налога)</h3></div>
+                <button class="btn-ghost" data-reset="chartNetProfit">Сброс зума</button>
+            </div>
+            <canvas id="chartNetProfit" height="120"></canvas>
+        </div>
+    </div>
 </div>
 {% endif %}
 {% endblock %}
@@ -74,18 +112,76 @@
 {% block extra_js %}
 <script>
 const labels = {{ chart_labels|safe }};
-function makeChart(id, label, data, color) {
+const dataEquityPnl = {{ chart_equity_pnl|safe }};
+const dataEquityPnlClean = {{ chart_equity_pnl_clean|safe }};
+const charts = {};
+
+const ACCENT = '#ff7a18', BLUE = '#3b9eff', GREEN = '#2ec27e', PURPLE = '#a78bfa';
+
+function grad(ctx, color){
+    const g = ctx.createLinearGradient(0,0,0,260);
+    g.addColorStop(0, color.replace('rgb','rgba').replace(')',',.28)'));
+    g.addColorStop(1, color.replace('rgb','rgba').replace(')',',0)'));
+    return g;
+}
+function hexToRgb(h){const n=parseInt(h.slice(1),16);return `rgb(${n>>16&255},${n>>8&255},${n&255})`;}
+
+function makeChart(id, label, data, hex){
     const el = document.getElementById(id);
     if (!el || !labels.length) return;
-    new Chart(el, {
+    const rgb = hexToRgb(hex);
+    const c = new Chart(el, {
         type: 'line',
-        data: { labels, datasets: [{ label, data, borderColor: color, tension: 0.2, fill: false }] },
-        options: { responsive: true, plugins: { legend: { display: true } } }
+        data: { labels, datasets: [{
+            label, data, borderColor: rgb, borderWidth: 2,
+            backgroundColor: grad(el.getContext('2d'), rgb),
+            fill: true, tension: .32, pointRadius: 0, pointHoverRadius: 5,
+            pointHoverBackgroundColor: rgb, pointHoverBorderColor:'#fff', pointHoverBorderWidth:2,
+        }]},
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor:'#13161d', borderColor:'#222733', borderWidth:1,
+                    padding:11, titleColor:'#9aa3b2', cornerRadius:9, displayColors:false,
+                    callbacks:{ label: c => ` ${label}: ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽` }
+                },
+                zoom: {
+                    zoom: {
+                        drag: { enabled: true, backgroundColor:'rgba(255,122,24,.12)', borderColor:'rgba(255,122,24,.5)', borderWidth:1 },
+                        mode: 'x',
+                    },
+                    pan: { enabled: true, mode: 'x', modifierKey:'shift' },
+                }
+            },
+            scales: {
+                x: { grid:{ display:false }, ticks:{ maxRotation:0, autoSkip:true, maxTicksLimit:8 } },
+                y: { grid:{ color:'rgba(255,255,255,.045)' }, ticks:{ callback:v=>v.toLocaleString('ru-RU') } },
+            }
+        }
     });
+    charts[id] = c;
+    return c;
 }
-makeChart('chartEquity', 'Total Equity', {{ chart_equity|safe }}, '#0d6efd');
-makeChart('chartEquityPnl', 'Daily Total Equity PnL', {{ chart_equity_pnl|safe }}, '#198754');
-makeChart('chartWacPnl', 'Daily Realized WAC PnL', {{ chart_wac_pnl|safe }}, '#fd7e14');
-makeChart('chartNetProfit', 'Net Profit After Tax', {{ chart_net_profit|safe }}, '#6f42c1');
+
+makeChart('chartEquityPnl', 'Total Equity PnL', dataEquityPnl, '#ff7a18');
+makeChart('chartEquity', 'Total Equity', {{ chart_equity|safe }}, '#3b9eff');
+makeChart('chartWacPnl', 'Realized WAC PnL', {{ chart_wac_pnl|safe }}, '#2ec27e');
+makeChart('chartNetProfit', 'Net Profit', {{ chart_net_profit|safe }}, '#a78bfa');
+
+// Reset-zoom buttons
+document.querySelectorAll('[data-reset]').forEach(b=>{
+    b.addEventListener('click', ()=>{ const c = charts[b.dataset.reset]; if(c) c.resetZoom(); });
+});
+
+// Toggle adjustment spikes on the equity-PnL chart
+const tgl = document.getElementById('togglePnlClean');
+if (tgl) tgl.addEventListener('change', ()=>{
+    const c = charts['chartEquityPnl']; if(!c) return;
+    c.data.datasets[0].data = tgl.checked ? dataEquityPnlClean : dataEquityPnl;
+    c.update();
+});
 </script>
 {% endblock %}
