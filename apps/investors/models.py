@@ -47,6 +47,12 @@ class Investor(TimestampedModel):
         related_name="profit_recipients",
     )
     split_percent = models.DecimalField(**settings.DECIMAL_RATE, null=True, blank=True)
+    # Where the un-assigned (residual) part of this investor's gross profit goes,
+    # e.g. a multiplier<1 investor's leftover. If unset → flagged as unassigned.
+    residual_investor = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="residual_recipients",
+    )
 
     is_active = models.BooleanField(default=True)
     comment = models.TextField(blank=True)
@@ -91,8 +97,9 @@ class Investor(TimestampedModel):
             or Decimal("0")
         )
 
-    # NOTE: lifetime "earned profit" is NOT derived from ProfitAllocation rows.
-    # It is computed live in services.profit_report() over automatic intervals.
+    # NOTE: lifetime profit & economic capital are NOT derived from ProfitAllocation
+    # rows. They are computed live in services.investor_report() over automatic
+    # intervals (economic_capital = external_capital + assigned_profit).
 
 
 class InvestorCapitalTransaction(TimestampedModel):

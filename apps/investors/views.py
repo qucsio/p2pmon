@@ -26,7 +26,7 @@ class InvestorForm(forms.ModelForm):
         fields = (
             "name", "profit_share_mode", "profit_share_multiplier",
             "profit_share_fixed_pct", "source_investor", "split_percent",
-            "is_active", "comment",
+            "residual_investor", "is_active", "comment",
         )
         labels = {
             "name": "Имя", "profit_share_mode": "Режим доли прибыли",
@@ -34,6 +34,7 @@ class InvestorForm(forms.ModelForm):
             "profit_share_fixed_pct": "Фикс. % прибыли",
             "source_investor": "Источник (для «доли от прибыли»)",
             "split_percent": "% от прибыли источника",
+            "residual_investor": "Получатель остатка (для множителя/none)",
             "is_active": "Активен", "comment": "Комментарий",
         }
 
@@ -42,8 +43,9 @@ class InvestorForm(forms.ModelForm):
         qs = Investor.objects.filter(user=user) if user else Investor.objects.none()
         if self.instance.pk:
             qs = qs.exclude(pk=self.instance.pk)
-        self.fields["source_investor"].queryset = qs
-        self.fields["source_investor"].required = False
+        for f in ("source_investor", "residual_investor"):
+            self.fields[f].queryset = qs
+            self.fields[f].required = False
 
 
 class CapitalTxnForm(forms.Form):
@@ -65,27 +67,28 @@ class ReportPeriodForm(forms.Form):
 @login_required
 def investor_list(request):
     account = get_active_account(request.user)
-    cap = services.capital_summary(request.user, account)
-    report = services.profit_report(request.user, account)
-    rep = {r["investor"].id: r for r in report.get("rows", [])}
-
+    rep = services.investor_report(request.user, account)
     rows = []
-    for cr in cap["rows"]:
-        inv = cr["investor"]
-        pr = rep.get(inv.id, {})
+    for r in rep["rows"]:
+        inv = r["investor"]
         rows.append({
             "inv": inv,
-            "units": cr["units"], "share": cr["share_pct"],
-            "capital_value": cr["capital_value"],
-            "net_external": cr["net_external_capital"],
-            "capital_pnl": cr["capital_pnl"],
+            "economic_capital": r["economic_capital"],
+            "net_external": r["net_external_capital"],
+            "economic_pnl": r["economic_pnl"],
+            "displayed": r["displayed_net"],
+            "units": r["units"],
+            "technical_share": r["technical_share"],
+            "raw_exposure": r["raw_exposure_value"],
+            "gross": r["gross_by_weight"],
+            "coeff": r["profit_coeff"],
+            "residual_out": r["residual_out"],
             "profit_mode": inv.get_profit_share_mode_display(),
-            "gross": pr.get("gross_by_capital", Decimal("0")),
-            "displayed": pr.get("displayed_net", Decimal("0")),
         })
     return render(request, "investors/list.html", {
-        "rows": rows, "equity": cap["equity"],
-        "unit_price": cap["unit_price"], "total_units": cap["total_units"],
+        "rows": rows, "equity": rep["equity"],
+        "unit_price": rep["unit_price"], "total_units": rep["total_units"],
+        "unassigned_residual": rep["unassigned_residual"], "warnings": rep["warnings"],
     })
 
 
@@ -117,30 +120,21 @@ def investor_detail(request, pk):
     investor = get_object_or_404(Investor, pk=pk, user=request.user)
     account = get_active_account(request.user)
 
-    cap = services.capital_summary(request.user, account)
-    cap_row = next((r for r in cap["rows"] if r["investor"].id == investor.id), None)
-    report = services.profit_report(request.user, account)
-    rep_row = next((r for r in report.get("rows", []) if r["investor"].id == investor.id), {})
+    rep = services.investor_report(request.user, account)
+    row = next((r for r in rep["rows"] if r["investor"].id == investor.id), {})
 
     txns = list(
         investor.capital_transactions.filter(type__in=services.CAPITAL_EVENT_TYPES)
         .order_by("effective_at", "id")
     )
-    # True capital value over time: daily units × daily unit price (not tx-based).
-    cap_labels, cap_values = services.capital_value_series(request.user, account, investor)
-
-    earn_series = report.get("series", {}).get(investor.id, [])
-    earn_labels = report.get("series_labels", [])
-
     return render(request, "investors/detail.html", {
         "investor": investor,
-        "cap": cap_row or {},
-        "rep": rep_row or {},
+        "row": row,
         "txns": list(reversed(txns)),
-        "cap_labels": json.dumps(cap_labels),
-        "cap_values": json.dumps(cap_values),
-        "earn_labels": json.dumps(earn_labels),
-        "earn_values": json.dumps(earn_series),
+        "cap_labels": json.dumps(rep["series_labels"]),
+        "cap_values": json.dumps(rep["econ_series"].get(investor.id, [])),
+        "earn_labels": json.dumps(rep["series_labels"]),
+        "earn_values": json.dumps(rep["disp_series"].get(investor.id, [])),
     })
 
 
@@ -221,13 +215,13 @@ def profit_report_view(request):
         pf = form.cleaned_data.get("period_from")
         pt = form.cleaned_data.get("period_to")
 
-    report = services.profit_report(request.user, account, pf, pt) if account else {"rows": []}
+    report = services.investor_report(request.user, account, pf, pt) if account else {"rows": []}
     flows = services.unassigned_external_flows(account) if account else []
 
     earned_labels = [r["investor"].name for r in report.get("rows", []) if r["displayed_net"]]
     earned_data = [float(r["displayed_net"]) for r in report.get("rows", []) if r["displayed_net"]]
     cum_datasets = [
-        {"label": r["investor"].name, "data": report["series"].get(r["investor"].id, [])}
+        {"label": r["investor"].name, "data": report.get("disp_series", {}).get(r["investor"].id, [])}
         for r in report.get("rows", [])
     ]
 

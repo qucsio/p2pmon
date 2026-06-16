@@ -1,11 +1,21 @@
-"""Fund-unit capital accounting and profit allocation for investors.
+"""Investor capital & profit accounting.
 
-Capital ownership is tracked as fund units. Each investor's capital value is
-``units * unit_price`` where ``unit_price = portfolio_equity / total_units``.
-Deposits/withdrawals issue/redeem units at the current price (so existing
-investors are not diluted), and they post a matching LedgerAdjustment so the
-portfolio cash actually moves. Profit allocation is a separate concept driven
-by each investor's ``profit_share_mode``.
+Two separate concepts:
+
+* TECHNICAL participation — fund units. ``units`` change ONLY on real capital
+  events (deposit/withdrawal/correction); profit never creates units.
+  ``raw_exposure_value = units / total_units * equity`` is technical only and is
+  NOT the investor's money for non-``same_as_capital`` modes.
+
+* ECONOMIC capital — what the investor actually owns:
+  ``economic_capital = net_external_capital + cumulative_assigned_profit``.
+  Assigned profit applies the investor's profit coefficient to their gross
+  (weight-based) profit per automatic interval; the un-assigned residual is
+  routed to ``residual_investor`` (or flagged as unassigned).
+
+``split_from_investor`` is reporting-only: it moves *displayed* profit between
+investors without touching units, NAV, or economic capital. See
+``investor_report`` for the single source of truth.
 """
 from datetime import datetime, time
 from decimal import Decimal
@@ -325,46 +335,30 @@ def withdraw(investor, amount_rub, effective_at, account, user, comment=""):
 # --------------------------------------------------------------------------- #
 # Profit allocation
 # --------------------------------------------------------------------------- #
-def _day_shares(active, units, total_open):
-    """Per-day profit-share percentage by mode. fixed/multiplier take their cut,
-    same_as_capital splits the remainder by capital, none/split start at 0."""
-    pct = {}
-    fixed_total = Decimal("0")
-    mult_total = Decimal("0")
-    same = []
-    cap = {}
-    for inv in active:
-        cap[inv.id] = (units[inv.id] / total_open * HUNDRED) if total_open > 0 else Decimal("0")
-    for inv in active:
-        m = inv.profit_share_mode
-        if m == Investor.PROFIT_FIXED_PCT:
-            p = inv.profit_share_fixed_pct or Decimal("0")
-            pct[inv.id] = p
-            fixed_total += p
-        elif m == Investor.PROFIT_MULTIPLIER:
-            p = cap[inv.id] * (inv.profit_share_multiplier or Decimal("0"))
-            pct[inv.id] = p
-            mult_total += p
-        elif m in (Investor.PROFIT_NONE, Investor.PROFIT_SPLIT):
-            pct[inv.id] = Decimal("0")
-        else:
-            same.append(inv)
-    remainder = HUNDRED - fixed_total - mult_total
-    same_cap = sum((cap[i.id] for i in same), Decimal("0"))
-    for inv in same:
-        pct[inv.id] = (remainder * cap[inv.id] / same_cap) if same_cap > 0 else Decimal("0")
-    return pct, cap
+def _profit_coeff_display(inv):
+    if inv.profit_share_mode == Investor.PROFIT_MULTIPLIER:
+        return inv.profit_share_multiplier or Decimal("0")
+    if inv.profit_share_mode == Investor.PROFIT_FIXED_PCT:
+        return inv.profit_share_fixed_pct or Decimal("0")
+    if inv.profit_share_mode == Investor.PROFIT_SAME_AS_CAPITAL:
+        return Decimal("1")
+    return Decimal("0")
 
 
-def profit_report(user, account, period_from=None, period_to=None):
-    """Reporting-only profit over automatic intervals (built implicitly from
-    capital-event dates by allocating each day by that day's ownership).
+def investor_report(user, account, period_from=None, period_to=None):
+    """Single source of truth. Walks daily snapshots over automatic intervals
+    (capital events) and computes, per investor:
 
-    Profit NEVER changes units/shares/NAV. For each investor it returns:
-      * gross_by_capital — profit attributable to their capital ownership
-      * displayed_net    — what we show them after reporting-only split transfers
-      * transferred_out / received — split bookkeeping (display only)
-    Defaults to the full history (first → latest snapshot)."""
+      * TECHNICAL: units, technical_share, raw_exposure_value (= units/total*equity),
+        gross_by_weight — raw participation, NOT money the investor owns.
+      * ECONOMIC: assigned_profit (gross adjusted by profit coefficient, with the
+        residual routed to residual_investor), economic_capital =
+        net_external_capital + assigned_profit, economic_pnl = assigned_profit.
+      * DISPLAYED: displayed_net — economic assigned adjusted by reporting-only
+        split_from_investor transfers (does not affect economic capital).
+
+    Profit never creates units; units change only on capital events.
+    """
     from collections import defaultdict
 
     snaps_qs = DailySnapshot.objects.filter(exchange_account=account)
@@ -373,136 +367,146 @@ def profit_report(user, account, period_from=None, period_to=None):
     if period_to:
         snaps_qs = snaps_qs.filter(day__lte=period_to)
     snaps = list(snaps_qs.order_by("day"))
-    if not snaps:
-        return {"profit": Decimal("0"), "rows": [], "period_from": period_from,
-                "period_to": period_to}
 
-    eff_to = period_to or snaps[-1].day
     investors = list(Investor.objects.filter(user=user))
     active = [i for i in investors if i.is_active]
+    by_id = {i.id: i for i in investors}
 
-    txns = list(
-        InvestorCapitalTransaction.objects.filter(
-            investor__user=user, type__in=CAPITAL_EVENT_TYPES,
-            effective_at__date__lte=eff_to,
-        ).order_by("effective_at", "id")
-    )
+    eff_to = period_to or (snaps[-1].day if snaps else None)
+    txns = []
+    if eff_to is not None:
+        txns = list(
+            InvestorCapitalTransaction.objects.filter(
+                investor__user=user, type__in=CAPITAL_EVENT_TYPES,
+                effective_at__date__lte=eff_to,
+            ).order_by("effective_at", "id")
+        )
 
-    gross = defaultdict(lambda: Decimal("0"))
-    displayed = defaultdict(lambda: Decimal("0"))
-    transferred_out = defaultdict(lambda: Decimal("0"))
-    received = defaultdict(lambda: Decimal("0"))
-    total_profit = Decimal("0")
     units = defaultdict(lambda: Decimal("0"))
-    ti = 0
+    ext = defaultdict(lambda: Decimal("0"))          # net external capital as-of
+    gross = defaultdict(lambda: Decimal("0"))
+    assigned = defaultdict(lambda: Decimal("0"))     # economic
+    residual_out = defaultdict(lambda: Decimal("0"))
+    residual_in = defaultdict(lambda: Decimal("0"))
+    displayed = defaultdict(lambda: Decimal("0"))
+    unassigned_residual = Decimal("0")
+    warnings = set()
+    total_profit = Decimal("0")
     series_labels = []
-    series = defaultdict(list)
+    econ_series = defaultdict(list)
+    disp_series = defaultdict(list)
+    ti = 0
 
     for snap in snaps:
         day = snap.day
-        # Deposit-day rule: a contribution effective on day D participates in day D's
-        # profit (interval starts on the capital-event date, e.g. 2026-05-19 → …).
         while ti < len(txns) and txns[ti].effective_at.date() <= day:
-            units[txns[ti].investor_id] += txns[ti].units_delta
+            t = txns[ti]
+            units[t.investor_id] += t.units_delta
+            ext[t.investor_id] += _signed_capital_amount(t)
             ti += 1
-        total_open = sum(units.values(), Decimal("0"))
-        day_profit = snap.daily_total_equity_pnl
-        total_profit += day_profit
+        total = sum(units.values(), Decimal("0"))
+        P = snap.daily_total_equity_pnl
+        total_profit += P
 
-        pct, _cap = _day_shares(active, units, total_open)
-        base = {inv.id: day_profit * pct[inv.id] / HUNDRED for inv in active}
-        for k, v in base.items():
-            gross[k] += v
-        disp = dict(base)
-        # split_from_investor is REPORTING ONLY: move displayed profit, nothing else.
+        gday = {}
         for inv in active:
-            if inv.profit_share_mode == Investor.PROFIT_SPLIT and inv.source_investor_id in disp:
-                transfer = base[inv.source_investor_id] * (inv.split_percent or Decimal("0")) / HUNDRED
-                disp[inv.id] += transfer
-                disp[inv.source_investor_id] -= transfer
-                received[inv.id] += transfer
-                transferred_out[inv.source_investor_id] += transfer
-        for k, v in disp.items():
+            w = (units[inv.id] / total) if total > 0 else Decimal("0")
+            gday[inv.id] = P * w
+            gross[inv.id] += gday[inv.id]
+
+        aday = defaultdict(lambda: Decimal("0"))
+        for inv in active:
+            g = gday[inv.id]
+            m = inv.profit_share_mode
+            if m == Investor.PROFIT_SAME_AS_CAPITAL:
+                aday[inv.id] += g
+            elif m == Investor.PROFIT_MULTIPLIER:
+                a = g * (inv.profit_share_multiplier or Decimal("0"))
+                aday[inv.id] += a
+                res = g - a
+                if res != 0:
+                    owner = inv.residual_investor
+                    if owner and owner.is_active:
+                        aday[owner.id] += res
+                        residual_in[owner.id] += res
+                    else:
+                        unassigned_residual += res
+                        warnings.add(inv.name)
+                    residual_out[inv.id] += res
+            elif m == Investor.PROFIT_NONE:
+                res = g
+                if res != 0:
+                    owner = inv.residual_investor
+                    if owner and owner.is_active:
+                        aday[owner.id] += res
+                        residual_in[owner.id] += res
+                    else:
+                        unassigned_residual += res
+                        warnings.add(inv.name)
+                    residual_out[inv.id] += res
+            elif m == Investor.PROFIT_FIXED_PCT:
+                aday[inv.id] += P * (inv.profit_share_fixed_pct or Decimal("0")) / HUNDRED
+            # split_from_investor → no economic assignment (display only)
+
+        for k, v in aday.items():
+            assigned[k] += v
+
+        dday = dict(aday)
+        for inv in active:
+            if inv.profit_share_mode == Investor.PROFIT_SPLIT and inv.source_investor_id in by_id:
+                base = aday.get(inv.source_investor_id, Decimal("0"))
+                tr = base * (inv.split_percent or Decimal("0")) / HUNDRED
+                dday[inv.id] = dday.get(inv.id, Decimal("0")) + tr
+                dday[inv.source_investor_id] = dday.get(inv.source_investor_id, Decimal("0")) - tr
+        for k, v in dday.items():
             displayed[k] += v
+
         series_labels.append(day.strftime("%d.%m.%Y"))
         for inv in active:
-            series[inv.id].append(round(float(displayed[inv.id]), 2))
+            econ_series[inv.id].append(round(float(ext[inv.id] + assigned[inv.id]), 2))
+            disp_series[inv.id].append(round(float(displayed[inv.id]), 2))
+
+    equity = snaps[-1].total_equity if snaps else portfolio_equity(account)
+    tu = sum(units.values(), Decimal("0"))
+    unit_price = (equity / tu) if tu > 0 else Decimal("1")
 
     rows = []
     for inv in active:
+        u = units[inv.id]
+        raw = (u / tu * equity) if tu > 0 else Decimal("0")
         rows.append({
             "investor": inv,
-            "gross_by_capital": q_rub(gross[inv.id]),
+            "units": u,
+            "technical_share": (u / tu * HUNDRED) if tu > 0 else Decimal("0"),
+            "raw_exposure_value": q_rub(raw),
+            "gross_by_weight": q_rub(gross[inv.id]),
+            "profit_coeff": _profit_coeff_display(inv),
+            "assigned_profit": q_rub(assigned[inv.id]),
+            "residual_out": q_rub(residual_out[inv.id]),
+            "residual_in": q_rub(residual_in[inv.id]),
             "displayed_net": q_rub(displayed[inv.id]),
-            "transferred_out": q_rub(transferred_out[inv.id]),
-            "received": q_rub(received[inv.id]),
+            "net_external_capital": q_rub(ext[inv.id]),
+            "economic_capital": q_rub(ext[inv.id] + assigned[inv.id]),
+            "economic_pnl": q_rub(assigned[inv.id]),
             "source_investor": inv.source_investor if inv.profit_share_mode == Investor.PROFIT_SPLIT else None,
         })
 
     return {
-        "profit": total_profit,
-        "rows": rows,
-        "period_from": snaps[0].day,
-        "period_to": snaps[-1].day,
+        "equity": equity, "total_units": tu, "unit_price": unit_price,
+        "profit": total_profit, "rows": rows,
+        "unassigned_residual": q_rub(unassigned_residual),
+        "warnings": sorted(warnings),
         "series_labels": series_labels,
-        "series": dict(series),
+        "econ_series": dict(econ_series),
+        "disp_series": dict(disp_series),
+        "period_from": snaps[0].day if snaps else period_from,
+        "period_to": snaps[-1].day if snaps else period_to,
     }
-
-
-def capital_value_series(user, account, investor):
-    """Daily capital value for one investor: for each snapshot day,
-    investor_units(end of day) × (equity / total_units(end of day))."""
-    from collections import defaultdict
-
-    snaps = list(
-        DailySnapshot.objects.filter(exchange_account=account).order_by("day")
-    )
-    txns = list(
-        InvestorCapitalTransaction.objects.filter(
-            investor__user=user, type__in=CAPITAL_EVENT_TYPES
-        ).order_by("effective_at", "id")
-    )
-    units = defaultdict(lambda: Decimal("0"))
-    ti = 0
-    labels, values = [], []
-    for snap in snaps:
-        day = snap.day
-        while ti < len(txns) and txns[ti].effective_at.date() <= day:
-            units[txns[ti].investor_id] += txns[ti].units_delta
-            ti += 1
-        total = sum(units.values(), Decimal("0"))
-        price = (snap.total_equity / total) if total > 0 else Decimal("0")
-        labels.append(day.strftime("%d.%m.%Y"))
-        values.append(float(units[investor.id] * price))
-    return labels, values
-
-
-def capital_summary(user, account):
-    """Capital-ownership block: units / share / value / net external capital /
-    capital PnL. Value = units / total_units * current equity."""
-    equity = portfolio_equity(account)
-    tu = total_units(user)
-    price = (equity / tu) if tu > 0 else Decimal("1")
-    rows = []
-    for inv in Investor.objects.filter(user=user).order_by("name"):
-        u = inv.units
-        value = (u / tu * equity) if tu > 0 else Decimal("0")
-        nec = net_external_capital(inv)
-        rows.append({
-            "investor": inv,
-            "units": u,
-            "share_pct": (u / tu * HUNDRED) if tu > 0 else Decimal("0"),
-            "capital_value": q_rub(value),
-            "net_external_capital": q_rub(nec),
-            "capital_pnl": q_rub(value - nec),
-        })
-    return {"equity": equity, "total_units": tu, "unit_price": price, "rows": rows}
 
 
 def unassigned_external_flows(account):
     """External capital/expense movements in the ledger not linked to any investor
-    (e.g. an unexplained equity drop). Tax payments are excluded. These should be
-    reviewed, not silently mixed into trading profit."""
+    (e.g. an unexplained equity drop). Tax payments are excluded."""
     out = []
     for adj in (
         account.adjustments.filter(is_deleted=False)

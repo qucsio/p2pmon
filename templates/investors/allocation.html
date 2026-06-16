@@ -13,6 +13,10 @@
     <p style="color:var(--txt-3);font-size:12px;margin:10px 0 0;">Без дат — за всё время. Интервалы между капитальными событиями учитываются автоматически; прибыль распределяется по владению на каждый день и не меняет капитал/доли/юниты.</p>
 </div>
 
+{% if report.unassigned_residual %}
+<div class="alert alert-warning">Нераспределённая остаточная прибыль: <b class="num">{{ report.unassigned_residual|floatformat:0|intcomma }} ₽</b>{% if report.warnings %} — укажите «Получатель остатка» для: {{ report.warnings|join:", " }}{% endif %}</div>
+{% endif %}
+
 {% if report.rows %}
 <div class="kpi-grid" style="margin-bottom:20px;">
     <div class="kpi"><span class="accent-bar"></span>
@@ -26,17 +30,19 @@
 <table class="table">
     <thead><tr>
         <th>Инвестор</th><th>Режим</th>
-        <th class="text-end">Прибыль по капиталу</th><th class="text-end">Передано</th>
-        <th class="text-end">Получено</th><th class="text-end">Показано (net)</th><th>Источник</th>
+        <th class="text-end">Gross по весу</th><th class="text-end">Коэф.</th>
+        <th class="text-end">Назначено (экон.)</th><th class="text-end">Остаток →</th>
+        <th class="text-end">Показано (net)</th><th>Источник</th>
     </tr></thead>
     <tbody>
     {% for r in report.rows %}
     <tr>
         <td>{{ r.investor.name }}</td>
         <td><span class="pill gray">{{ r.investor.get_profit_share_mode_display }}</span></td>
-        <td class="num text-end {% if r.gross_by_capital >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross_by_capital|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.transferred_out|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.received|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.gross_by_weight >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross_by_weight|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.profit_coeff|floatformat:2 }}</td>
+        <td class="num text-end {% if r.assigned_profit >= 0 %}pos{% else %}neg{% endif %}">{{ r.assigned_profit|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.residual_out|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end {% if r.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ r.displayed_net|floatformat:0|intcomma }} ₽</td>
         <td>{% if r.source_investor %}{{ r.source_investor.name }}{% else %}—{% endif %}</td>
     </tr>

@@ -11,37 +11,43 @@
 {% endblock %}
 {% block content %}
 
-<div class="section-label">Капитал (владение)</div>
+<div class="section-label">Экономический капитал (реальный баланс)</div>
 <div class="kpi-grid" style="margin-bottom:20px;">
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Капитал</div>
-        <div class="val num">{{ cap.capital_value|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">доля: <b class="num">{{ cap.share_pct|default:0|floatformat:2 }}%</b> · юнитов: <b class="num">{{ cap.units|default:0|floatformat:2 }}</b></div></div>
+        <div class="label">Экономический капитал</div>
+        <div class="val num">{{ row.economic_capital|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">внешний капитал + назначенная прибыль</div></div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Внешний капитал (нетто)</div>
-        <div class="val num">{{ cap.net_external_capital|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="val num">{{ row.net_external_capital|default:0|floatformat:0|intcomma }} ₽</div>
         <div class="sub">депозиты − выводы ± корректировки</div></div>
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Capital PnL</div>
-        <div class="val num {% if cap.capital_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ cap.capital_pnl|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">капитал − внешний капитал</div></div>
-</div>
-
-<div class="section-label">Прибыль (только отображение)</div>
-<div class="kpi-grid" style="margin-bottom:22px;">
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Прибыль по капиталу</div>
-        <div class="val num {% if rep.gross_by_capital >= 0 %}pos{% else %}neg{% endif %}">{{ rep.gross_by_capital|default:0|floatformat:0|intcomma }} ₽</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Передано другому</div>
-        <div class="val num">{{ rep.transferred_out|default:0|floatformat:0|intcomma }} ₽</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Получено по соглашению</div>
-        <div class="val num">{{ rep.received|default:0|floatformat:0|intcomma }} ₽</div>
-        {% if rep.source_investor %}<div class="sub">источник: {{ rep.source_investor.name }}</div>{% endif %}</div>
+        <div class="label">Прибыль по соглашению</div>
+        <div class="val num {% if row.assigned_profit >= 0 %}pos{% else %}neg{% endif %}">{{ row.assigned_profit|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">экон. PnL</div></div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Показанная прибыль (net)</div>
-        <div class="val num {% if rep.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ rep.displayed_net|default:0|floatformat:0|intcomma }} ₽</div></div>
+        <div class="val num {% if row.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ row.displayed_net|default:0|floatformat:0|intcomma }} ₽</div>
+        {% if row.source_investor %}<div class="sub">источник: {{ row.source_investor.name }}</div>{% endif %}</div>
+</div>
+
+<div class="section-label">Технические показатели (не капитал инвестора)</div>
+<div class="kpi-grid" style="margin-bottom:22px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Юниты / тех. доля</div>
+        <div class="val num">{{ row.units|default:0|floatformat:2 }}</div>
+        <div class="sub">доля: <b class="num">{{ row.technical_share|default:0|floatformat:2 }}%</b></div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Raw exposure (технич.)</div>
+        <div class="val num" style="color:var(--txt-2);">{{ row.raw_exposure_value|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">units × цена юнита — НЕ капитал</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Gross по весу · коэф.</div>
+        <div class="val num">{{ row.gross_by_weight|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">коэф.: <b class="num">{{ row.profit_coeff|default:0|floatformat:2 }}</b> · передан остаток: <b class="num">{{ row.residual_out|default:0|floatformat:0|intcomma }} ₽</b></div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Получен остаток</div>
+        <div class="val num">{{ row.residual_in|default:0|floatformat:0|intcomma }} ₽</div></div>
 </div>
 
 <div class="row g-3" style="margin-bottom:22px;">
