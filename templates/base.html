@@ -155,6 +155,10 @@
     /* alerts */
     .alert{border:1px solid var(--border);border-radius:var(--radius-sm);}
 
+    /* chart sizing — fixed-height box prevents canvas runaway growth */
+    .chart-box{position:relative;height:260px;width:100%;}
+    .chart-box canvas{position:absolute;inset:0;}
+
     /* calendar heatmap */
     .heatmap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:4px;}
     .heat-cell{width:15px;height:15px;border-radius:3px;background:#161a22;cursor:pointer;transition:transform .1s;}
