@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{{ investor.name }}{% endblock %}
+{% block heading %}{{ investor.name }}{% endblock %}
+{% block topbar_extra %}
+<div class="topbar-actions">
+    <a href="{% url 'investors:deposit' investor.pk %}" class="btn-ghost ok">+ Депозит</a>
+    <a href="{% url 'investors:withdraw' investor.pk %}" class="btn-ghost warn">− Вывод</a>
+    <a href="{% url 'investors:edit' investor.pk %}" class="btn-ghost">Изменить</a>
+</div>
+{% endblock %}
+{% block content %}
+
+<div class="kpi-grid" style="margin-bottom:22px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Капитал</div>
+        <div class="val num">{{ capital_value|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">доля: <b class="num">{{ capital_share_pct|floatformat:2 }}%</b> · юнитов: <b class="num">{{ units|floatformat:2 }}</b></div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Заработано прибыли</div>
+        <div class="val num {% if earned >= 0 %}pos{% else %}neg{% endif %}">{{ earned|floatformat:0|intcomma }} ₽</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Выплачено</div>
+        <div class="val num">{{ paid|floatformat:0|intcomma }} ₽</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Реинвестировано</div>
+        <div class="val num">{{ reinvested|floatformat:0|intcomma }} ₽</div></div>
+</div>
+
+<div class="row g-3" style="margin-bottom:22px;">
+    <div class="col-xl-6"><div class="panel">
+        <div class="panel-head"><div><p class="panel-sub">Капитал</p><h3 class="panel-title">Капитал во времени</h3></div></div>
+        <div class="chart-box" style="height:230px;"><canvas id="capChart"></canvas></div>
+    </div></div>
+    <div class="col-xl-6"><div class="panel">
+        <div class="panel-head"><div><p class="panel-sub">Прибыль</p><h3 class="panel-title">Накопленная прибыль</h3></div></div>
+        <div class="chart-box" style="height:230px;"><canvas id="earnChart"></canvas></div>
+    </div></div>
+</div>
+
+<div class="section-label">Выплаты и реинвестиции</div>
+<div class="panel table-panel panel-pad-0" style="margin-bottom:22px;">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>Период</th><th class="text-end">Доля прибыли</th><th class="text-end">Сумма</th><th>Статус</th><th class="text-end">Действия</th></tr></thead>
+    <tbody>
+    {% for a in allocations %}
+    <tr>
+        <td class="num">{{ a.period_from|date:"d.m.Y" }} – {{ a.period_to|date:"d.m.Y" }}</td>
+        <td class="num text-end">{{ a.profit_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:0|intcomma }} ₽</td>
+        <td>
+            {% if a.status == 'paid_out' %}<span class="pill green">Выплачено</span>
+            {% elif a.status == 'reinvested' %}<span class="pill" style="color:var(--blue);background:var(--blue-soft);">Реинвест.</span>
+            {% else %}<span class="pill gray">Не выплачено</span>{% endif %}
+        </td>
+        <td class="text-end" style="white-space:nowrap;">
+            {% if a.status == 'unpaid' %}
+            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
+                <input type="hidden" name="status" value="paid_out">
+                <button class="btn-ghost btn-xs ok">Выплатить</button>
+            </form>
+            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
+                <input type="hidden" name="status" value="reinvested">
+                <button class="btn-ghost btn-xs">Реинвест</button>
+            </form>
+            {% else %}<span style="color:var(--txt-3);">заморожено</span>{% endif %}
+        </td>
+    </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="5">Нет аллокаций</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+
+<div class="section-label">Движения капитала</div>
+<div class="panel table-panel panel-pad-0">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма</th><th class="text-end">Δ юнитов</th><th class="text-end">Цена юнита</th><th>Комментарий</th></tr></thead>
+    <tbody>
+    {% for t in txns %}
+    <tr>
+        <td class="num">{{ t.effective_at|date:"d.m.Y H:i" }}</td>
+        <td><span class="pill gray">{{ t.get_type_display }}</span></td>
+        <td class="num text-end">{{ t.amount_rub|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if t.units_delta >= 0 %}pos{% else %}neg{% endif %}">{{ t.units_delta|floatformat:2 }}</td>
+        <td class="num text-end">{{ t.unit_price|floatformat:4 }}</td>
+        <td style="color:var(--txt-2);">{{ t.comment|truncatechars:48 }}</td>
+    </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="6">Нет движений</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function lineChart(id, labels, data, hex, label){
+    const el = document.getElementById(id); if(!el || !labels.length) return;
+    const n = parseInt(hex.slice(1),16), rgb = `rgb(${n>>16&255},${n>>8&255},${n&255})`;
+    const g = el.getContext('2d').createLinearGradient(0,0,0,230);
+    g.addColorStop(0, rgb.replace('rgb','rgba').replace(')',',.28)'));
+    g.addColorStop(1, rgb.replace('rgb','rgba').replace(')',',0)'));
+    new Chart(el, { type:'line',
+        data:{ labels, datasets:[{ label, data, borderColor:rgb, borderWidth:2, backgroundColor:g, fill:true, tension:.3, pointRadius:0, pointHoverRadius:5 }]},
+        options:{ responsive:true, maintainAspectRatio:false,
+            interaction:{mode:'index',intersect:false},
+            plugins:{ legend:{display:false}, tooltip:{ backgroundColor:'#13161d', borderColor:'#222733', borderWidth:1, cornerRadius:9, displayColors:false,
+                callbacks:{ label:c=>` ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽` } } },
+            scales:{ x:{grid:{display:false},ticks:{maxTicksLimit:8,maxRotation:0}}, y:{grid:{color:'rgba(255,255,255,.045)'},ticks:{callback:v=>v.toLocaleString('ru-RU')}} } }
+    });
+}
+lineChart('capChart', {{ cap_labels|safe }}, {{ cap_values|safe }}, '#3b9eff', 'Капитал');
+lineChart('earnChart', {{ earn_labels|safe }}, {{ earn_values|safe }}, '#2ec27e', 'Прибыль');
+</script>
+{% endblock %}

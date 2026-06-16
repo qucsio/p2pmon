@@ -1,34 +1,60 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Инвесторы{% endblock %}
 {% block heading %}Инвесторы{% endblock %}
 {% block topbar_extra %}
 <div class="topbar-actions">
-    <span class="pill gray">Активные доли: {{ total_share }}%</span>
-    <a href="{% url 'investors:allocation' %}" class="btn-ghost">Рассчитать распределение</a>
+    <a href="{% url 'investors:allocation' %}" class="btn-ghost">Распределение прибыли</a>
     <a href="{% url 'investors:create' %}" class="btn-accent">+ Добавить</a>
 </div>
 {% endblock %}
 {% block content %}
 
-{% if total_share != 100 %}
-<div class="alert alert-warning">Сумма активных долей должна быть 100% для распределения (сейчас {{ total_share }}%). Можно добавлять инвесторов постепенно.</div>
-{% endif %}
+<div class="kpi-grid" style="margin-bottom:22px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Капитал фонда (equity)</div>
+        <div class="val num">{{ equity|floatformat:0|intcomma }} ₽</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Всего юнитов</div>
+        <div class="val num">{{ total_units|floatformat:2|intcomma }}</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Цена юнита</div>
+        <div class="val num">{{ unit_price|floatformat:4 }} ₽</div></div>
+</div>
 
 <div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
-    <thead><tr><th>Имя</th><th class="text-end">Доля %</th><th>Активен</th><th>Комментарий</th><th class="text-end">Действия</th></tr></thead>
+    <thead><tr>
+        <th>Имя</th>
+        <th class="text-end">Капитал</th>
+        <th class="text-end">Доля капитала</th>
+        <th class="text-end">Юниты</th>
+        <th>Режим прибыли</th>
+        <th class="text-end">Тек. доля прибыли</th>
+        <th class="text-end">Заработано</th>
+        <th class="text-end">Выплачено</th>
+        <th class="text-end">Реинвест.</th>
+        <th></th>
+    </tr></thead>
     <tbody>
-    {% for i in investors %}
-    <tr {% if not i.is_active %}class="muted-row"{% endif %}>
-        <td>{{ i.name }}</td>
-        <td class="num text-end">{{ i.share_percent }}</td>
-        <td>{% if i.is_active %}<span class="pill green">Да</span>{% else %}<span class="pill gray">Нет</span>{% endif %}</td>
-        <td>{{ i.comment|truncatechars:40 }}</td>
-        <td class="text-end"><a href="{% url 'investors:edit' i.pk %}" class="btn-ghost btn-xs">Изменить</a></td>
+    {% for r in rows %}
+    <tr {% if not r.inv.is_active %}class="muted-row"{% endif %}>
+        <td><a href="{% url 'investors:detail' r.inv.pk %}" style="color:var(--txt);font-weight:600;">{{ r.inv.name }}</a></td>
+        <td class="num text-end">{{ r.capital_value|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.capital_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end">{{ r.units|floatformat:2 }}</td>
+        <td><span class="pill gray">{{ r.profit_mode }}</span></td>
+        <td class="num text-end">{% if r.profit_share_pct != None %}{{ r.profit_share_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
+        <td class="num text-end {% if r.earned >= 0 %}pos{% else %}neg{% endif %}">{{ r.earned|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.paid|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.reinvested|floatformat:0|intcomma }} ₽</td>
+        <td class="text-end" style="white-space:nowrap;">
+            <a href="{% url 'investors:detail' r.inv.pk %}" class="btn-ghost btn-xs">Открыть</a>
+        </td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="5">Нет инвесторов</td></tr>
+    <tr class="empty-row"><td colspan="10">Нет инвесторов</td></tr>
     {% endfor %}
     </tbody>
 </table>

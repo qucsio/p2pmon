@@ -3,32 +3,95 @@
 {% block title %}Распределение прибыли{% endblock %}
 {% block heading %}Распределение прибыли{% endblock %}
 {% block content %}
+
 <div class="panel" style="margin-bottom:18px;">
-    <form method="post" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">{% csrf_token %}
-        <div><label class="panel-sub" style="display:block;margin-bottom:5px;">С даты</label>{{ form.period_from }}</div>
-        <div><label class="panel-sub" style="display:block;margin-bottom:5px;">По дату</label>{{ form.period_to }}</div>
+    <form method="get" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="form-field" style="margin:0;"><label class="form-label">С даты</label>{{ form.period_from }}</div>
+        <div class="form-field" style="margin:0;"><label class="form-label">По дату</label>{{ form.period_to }}</div>
         <button class="btn-accent" type="submit">Рассчитать</button>
     </form>
 </div>
 
+{% if preview %}
+<div class="kpi-grid" style="margin-bottom:20px;">
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Чистая прибыль периода</div>
+        <div class="val num {% if preview.net >= 0 %}pos{% else %}neg{% endif %}">{{ preview.net|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">gross {{ preview.gross|floatformat:0|intcomma }} · комиссии {{ preview.fees|floatformat:0|intcomma }} · налог {{ preview.tax|floatformat:0|intcomma }}</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Распределено</div>
+        <div class="val num">{{ preview.allocated_pct|floatformat:2 }}%</div>
+        {% if preview.leftover_pct >= 0.01 or preview.leftover_pct <= -0.01 %}
+        <div class="sub neg">нераспределено: {{ preview.leftover_pct|floatformat:2 }}%</div>
+        {% else %}<div class="sub pos">100% распределено</div>{% endif %}</div>
+</div>
+
+<div class="panel table-panel panel-pad-0" style="margin-bottom:14px;">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr>
+        <th>Инвестор</th><th>Режим</th><th class="text-end">Доля капитала</th><th class="text-end">Доля прибыли</th>
+        <th class="text-end">Gross</th><th class="text-end">Комиссии</th><th class="text-end">Налог</th><th class="text-end">К выплате</th>
+    </tr></thead>
+    <tbody>
+    {% for r in preview.rows %}
+    <tr>
+        <td>{{ r.investor.name }}</td>
+        <td><span class="pill gray">{{ r.investor.get_profit_share_mode_display }}</span></td>
+        <td class="num text-end">{{ r.capital_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end">{{ r.profit_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end">{{ r.gross_profit|floatformat:0|intcomma }}</td>
+        <td class="num text-end">{{ r.fees_part|floatformat:0|intcomma }}</td>
+        <td class="num text-end">{{ r.tax_part|floatformat:0|intcomma }}</td>
+        <td class="num text-end {% if r.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ r.net_profit|floatformat:0|intcomma }} ₽</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+
+<form method="post" action="?period_from={{ period_from|date:'Y-m-d' }}&period_to={{ period_to|date:'Y-m-d' }}">{% csrf_token %}
+    <input type="hidden" name="action" value="save">
+    <button class="btn-accent" type="submit">Сохранить аллокацию</button>
+    <span style="color:var(--txt-3);font-size:12px;margin-left:8px;">Сохранённые аллокации можно затем отметить «Выплачено» / «Реинвест».</span>
+</form>
+{% endif %}
+
+<div class="section-label" style="margin-top:26px;">Сохранённые аллокации</div>
 <div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
     <thead><tr>
-        <th>Инвестор</th><th class="text-end">Доля %</th><th class="text-end">Gross</th><th class="text-end">Комиссии</th><th class="text-end">Налог</th><th class="text-end">Чистая</th>
+        <th>Период</th><th>Инвестор</th><th class="text-end">Доля прибыли</th><th class="text-end">Сумма</th><th>Статус</th><th class="text-end">Действия</th>
     </tr></thead>
     <tbody>
-    {% for a in allocations %}
+    {% for a in saved %}
     <tr>
+        <td class="num" style="white-space:nowrap;">{{ a.period_from|date:"d.m.Y" }} – {{ a.period_to|date:"d.m.Y" }}</td>
         <td>{{ a.investor.name }}</td>
-        <td class="num text-end">{{ a.share_percent }}</td>
-        <td class="num text-end">{{ a.gross_profit|floatformat:2 }}</td>
-        <td class="num text-end">{{ a.fees_part|floatformat:2 }}</td>
-        <td class="num text-end">{{ a.tax_part|floatformat:2 }}</td>
-        <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:2 }}</td>
+        <td class="num text-end">{{ a.profit_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:0|intcomma }} ₽</td>
+        <td>
+            {% if a.status == 'paid_out' %}<span class="pill green">Выплачено</span>
+            {% elif a.status == 'reinvested' %}<span class="pill" style="color:var(--blue);background:var(--blue-soft);">Реинвест.</span>
+            {% else %}<span class="pill gray">Не выплачено</span>{% endif %}
+        </td>
+        <td class="text-end" style="white-space:nowrap;">
+            {% if a.status == 'unpaid' %}
+            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
+                <input type="hidden" name="status" value="paid_out">
+                <button class="btn-ghost btn-xs ok">Выплатить</button>
+            </form>
+            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
+                <input type="hidden" name="status" value="reinvested">
+                <button class="btn-ghost btn-xs">Реинвест</button>
+            </form>
+            {% else %}<span style="color:var(--txt-3);">заморожено</span>{% endif %}
+        </td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="6">Пока нет распределений</td></tr>
+    <tr class="empty-row"><td colspan="6">Пока нет сохранённых аллокаций</td></tr>
     {% endfor %}
     </tbody>
 </table>

@@ -1,12 +1,23 @@
 from django.contrib import admin
 
-from apps.investors.models import Investor, ProfitAllocation, TaxSetting
+from apps.investors.models import (
+    Investor,
+    InvestorCapitalTransaction,
+    ProfitAllocation,
+    TaxSetting,
+)
 
 
 @admin.register(Investor)
 class InvestorAdmin(admin.ModelAdmin):
-    list_display = ("name", "share_percent", "is_active", "user")
-    list_filter = ("is_active",)
+    list_display = ("name", "profit_share_mode", "profit_share_multiplier", "is_active", "user")
+    list_filter = ("is_active", "profit_share_mode")
+
+
+@admin.register(InvestorCapitalTransaction)
+class InvestorCapitalTransactionAdmin(admin.ModelAdmin):
+    list_display = ("investor", "type", "amount_rub", "units_delta", "unit_price", "effective_at")
+    list_filter = ("type",)
 
 
 @admin.register(TaxSetting)
@@ -17,4 +28,5 @@ class TaxSettingAdmin(admin.ModelAdmin):
 
 @admin.register(ProfitAllocation)
 class ProfitAllocationAdmin(admin.ModelAdmin):
-    list_display = ("investor", "period_from", "period_to", "net_profit", "share_percent")
+    list_display = ("investor", "period_from", "period_to", "net_profit", "profit_share_pct", "status")
+    list_filter = ("status",)

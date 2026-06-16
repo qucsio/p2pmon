@@ -1,0 +1,17 @@
+{% comment %}Renders a Django form as stacked, full-width fields. Expects `form`.{% endcomment %}
+{% for field in form %}
+    {% if field.field.widget.input_type == "checkbox" %}
+    <div class="form-field form-check-row">
+        <label class="switch">{{ field }}<span class="track"></span>{{ field.label }}</label>
+        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+        {% if field.errors %}<div class="neg">{{ field.errors }}</div>{% endif %}
+    </div>
+    {% else %}
+    <div class="form-field">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+        {% if field.errors %}<div class="neg">{{ field.errors }}</div>{% endif %}
+    </div>
+    {% endif %}
+{% endfor %}

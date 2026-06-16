@@ -4,11 +4,8 @@
 {% block content %}
 <div class="panel" style="max-width:520px;">
     <form method="post">{% csrf_token %}
-        <div class="mb-3">
-            <label class="form-label" style="font-size:12.5px;color:var(--txt-2);">Причина (обязательно)</label>
-            {{ form.ignore_reason }}
-        </div>
-        <div style="display:flex;gap:9px;margin-top:14px;">
+        {% include "_form_fields.html" %}
+        <div class="form-actions">
             <button type="submit" class="btn-ghost warn">Скрыть</button>
             <a href="{% url 'orders:list' %}" class="btn-ghost">Отмена</a>
         </div>

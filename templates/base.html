@@ -190,6 +190,18 @@
     }
     .content select option{background:var(--panel);color:var(--txt);}
 
+    /* stacked form fields (shared _form_fields.html) */
+    .form-field{margin-bottom:16px;max-width:420px;}
+    .form-field>.form-label{display:block;font-size:12.5px;font-weight:500;color:var(--txt-2);margin-bottom:6px;}
+    .form-field input:not([type=checkbox]):not([type=radio]),
+    .form-field select,
+    .form-field textarea{width:100%;}
+    .form-field textarea{min-height:96px;resize:vertical;}
+    .form-field .help{font-size:11.5px;color:var(--txt-3);margin-top:5px;}
+    .form-field .neg{font-size:12px;margin-top:5px;}
+    .form-field.form-check-row{display:flex;flex-direction:column;gap:5px;}
+    .form-actions{display:flex;gap:9px;margin-top:22px;padding-top:18px;border-top:1px solid var(--border-soft);}
+
     /* alerts */
     .alert{border:1px solid var(--border);border-radius:var(--radius-sm);}
 
