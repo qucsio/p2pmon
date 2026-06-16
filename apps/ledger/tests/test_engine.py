@@ -3,8 +3,10 @@ from decimal import Decimal
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from apps.common.decimal_utils import q_usdt
+from apps.common.decimal_utils import q_rub, q_usdt
 from apps.exchange.models import ExchangeAccount
 from apps.investors.models import Investor
 from apps.ledger.models import LedgerAdjustment, LedgerEvent
@@ -13,6 +15,7 @@ from apps.orders.models import P2POrder, RawP2POrder
 
 
 User = get_user_model()
+MSK = ZoneInfo("Europe/Moscow")
 
 
 class LedgerEngineTests(TestCase):
@@ -25,13 +28,13 @@ class LedgerEngineTests(TestCase):
         self.account.set_api_credentials("key", "secret")
         self.account.save()
 
-    def _create_order(self, side, rub, qty, price, fee=0, fee_currency="USDT", day_offset=0):
+    def _create_order(self, side, rub, qty, price, fee=0, fee_currency="USDT", day_offset=0, at=None):
         raw = RawP2POrder.objects.create(
             exchange_account=self.account,
             bybit_order_id=f"order-{RawP2POrder.objects.count() + 1}",
             raw_list_payload={"id": "x", "side": 0 if side == "BUY" else 1},
         )
-        now = timezone.now() + timezone.timedelta(days=day_offset)
+        now = at or (timezone.now() + timezone.timedelta(days=day_offset))
         return P2POrder.objects.create(
             exchange_account=self.account,
             raw_order=raw,
@@ -106,6 +109,39 @@ class LedgerEngineTests(TestCase):
         LedgerEngine(self.account).rebuild()
         e2 = list(LedgerEvent.objects.filter(exchange_account=self.account).values_list("amount_rub", flat=True))
         self.assertEqual(e1, e2)
+
+    def test_last_price_carries_forward_on_adjustment_only_day(self):
+        day1 = datetime(2026, 5, 30, 12, 0, tzinfo=MSK)
+        day2 = datetime(2026, 5, 31, 12, 0, tzinfo=MSK)
+
+        self._create_order("BUY", rub=7600, qty=100, price=76, at=day1)
+        LedgerAdjustment.objects.create(
+            exchange_account=self.account,
+            account=LedgerAdjustment.ACCOUNT_BANK,
+            type=LedgerAdjustment.TYPE_WITHDRAWAL,
+            currency="RUB",
+            amount_rub=Decimal("1000"),
+            amount_usdt=Decimal("0"),
+            effective_at=day2,
+        )
+
+        LedgerEngine(self.account).rebuild()
+        snaps = list(self.account.daily_snapshots.order_by("day"))
+        self.assertEqual(len(snaps), 2)
+
+        day1_snap, day2_snap = snaps
+        self.assertEqual(day1_snap.last_price, Decimal("76.000000"))
+        self.assertEqual(day2_snap.last_price, Decimal("76.000000"))
+
+        expected_equity = q_rub(
+            day2_snap.bank_balance + q_rub(day2_snap.exchange_balance * Decimal("76"))
+        )
+        self.assertEqual(day2_snap.total_equity, expected_equity)
+        self.assertNotEqual(day2_snap.total_equity, day2_snap.bank_balance)
+
+        bogus_unrealized = q_rub(-day2_snap.exchange_balance * day2_snap.wac_price)
+        self.assertNotEqual(day2_snap.daily_wac_unrealized_pnl, bogus_unrealized)
+        self.assertEqual(day2_snap.daily_wac_unrealized_pnl, Decimal("0.00"))
 
 
 class InvestorModelTests(TestCase):

@@ -127,17 +127,24 @@ class LedgerEngine:
                 acc.last_price_eod = state.last_price
 
         all_days = sorted(daily_acc.keys())
+        prev_last_price: Decimal | None = None
 
         for day in all_days:
             acc = daily_acc[day]
-            last_price = acc.last_price_eod or acc.last_price or Decimal("0")
-
             bank = acc.bank_eod or Decimal("0")
             exchange = acc.exchange_eod or Decimal("0")
             wac_price_val = acc.wac_eod or Decimal("0")
             wac_qty = acc.wac_qty_eod or Decimal("0")
             wac_cost = acc.wac_cost_eod or Decimal("0")
             wac_realized_cum = acc.wac_realized_cum_eod or Decimal("0")
+
+            last_price = acc.last_price_eod or acc.last_price or Decimal("0")
+            if last_price <= 0 and prev_last_price is not None and prev_last_price > 0:
+                last_price = prev_last_price
+            if last_price <= 0 and exchange > 0 and wac_price_val > 0:
+                last_price = wac_price_val
+            if last_price > 0:
+                prev_last_price = last_price
 
             equity = q_rub(bank + q_rub(exchange * last_price))
             adj_effect = q_rub(acc.bank_adj_rub + q_rub(acc.exchange_adj_usdt * last_price))
@@ -213,18 +220,21 @@ class LedgerEngine:
             qty = abs(d(ev["amount_usdt"]))
             fee = d(ev["fee_amount"])
             fee_currency = (ev["fee_currency"] or "").upper()
+            price = d(ev["price"])
 
             if fee_currency == "RUB" and fee > 0:
                 rub = q_rub(rub + fee)
                 fee_rub = q_rub(fee)
             elif fee_currency == "USDT" and fee > 0:
-                fee_rub = q_rub(fee * d(ev["price"]))
+                fee_rub = q_rub(fee * price)
 
             state.bank = q_rub(state.bank - rub)
             state.exchange = q_usdt(state.exchange + qty)
             state.wac_qty = q_usdt(state.wac_qty + qty)
             state.wac_cost = q_rub(state.wac_cost + rub)
             state.fees_cum = q_rub(state.fees_cum + fee_rub)
+            if price > 0:
+                state.last_price = q_price(price)
 
         elif event_type == LedgerEvent.EVENT_SELL:
             rub = abs(d(ev["amount_rub"]))
@@ -232,11 +242,12 @@ class LedgerEngine:
             fee = d(ev["fee_amount"])
             fee_currency = (ev["fee_currency"] or "").upper()
             wac_before = state.wac_price()
+            price = d(ev["price"])
 
             if fee_currency == "USDT" and fee > 0:
                 qty_out = q_usdt(qty_gross + fee)
                 wac_realized = q_rub(rub - wac_before * qty_out)
-                fee_rub = q_rub(fee * d(ev["price"]))
+                fee_rub = q_rub(fee * price)
             elif fee_currency == "RUB" and fee > 0:
                 net_rub = q_rub(rub - fee)
                 qty_out = qty_gross
@@ -254,6 +265,8 @@ class LedgerEngine:
             state.wac_cost = q_rub(state.wac_cost - wac_before * qty_from_pos)
             state.wac_realized_cum = q_rub(state.wac_realized_cum + wac_realized)
             state.fees_cum = q_rub(state.fees_cum + fee_rub)
+            if price > 0:
+                state.last_price = q_price(price)
 
         elif event_type in (
             LedgerEvent.EVENT_BANK_DEPOSIT,
