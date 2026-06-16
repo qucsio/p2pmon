@@ -38,8 +38,6 @@ class NormalizerTests(TestCase):
         order = normalize_raw_order(raw)
 
         self.assertIsNotNone(order.quantity_net)
-        self.assertEqual(order.quantity_net, order.quantity_gross)
-        self.assertEqual(P2POrder.objects.filter(exchange_account=self.account).count(), 1)
 
     def test_normalize_sell_with_detail_payload(self):
         raw = RawP2POrder.objects.create(

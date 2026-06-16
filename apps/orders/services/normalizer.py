@@ -6,6 +6,7 @@ from apps.common.decimal_utils import d, q_price, q_rub, q_usdt
 from apps.exchange.models import ExchangeAccount
 from apps.orders.models import P2POrder, RawP2POrder
 from apps.orders.services.fees import resolve_fee
+from apps.orders.services.ignore_rules import apply_ignore_rules
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 COMPLETED_STATUS = 50
@@ -136,6 +137,10 @@ def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
     return order
 
 
-def normalize_account_orders(exchange_account: ExchangeAccount):
+def normalize_account_orders(exchange_account: ExchangeAccount, *, rebuild_ledger: bool = True):
     for raw in RawP2POrder.objects.filter(exchange_account=exchange_account):
         normalize_raw_order(raw)
+    apply_ignore_rules(exchange_account)
+    if rebuild_ledger:
+        from apps.ledger.tasks import rebuild_ledger
+        rebuild_ledger.delay(exchange_account.id)

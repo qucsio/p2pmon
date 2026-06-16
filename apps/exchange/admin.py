@@ -7,7 +7,7 @@ from apps.exchange.models import ExchangeAccount, FeeRule, SyncLog
 @admin.register(ExchangeAccount)
 class ExchangeAccountAdmin(admin.ModelAdmin):
     form = ExchangeAccountAdminForm
-    list_display = ("name", "exchange", "user", "is_active", "last_successful_sync_at")
+    list_display = ("name", "exchange", "user", "is_active", "last_successful_sync_at", "ledger_start_at")
     list_filter = ("is_active", "exchange")
     readonly_fields = ("last_successful_sync_at", "created_at", "updated_at")
 

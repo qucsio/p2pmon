@@ -141,3 +141,29 @@ class P2POrder(TimestampedModel):
     @property
     def is_ignored(self):
         return not self.include_in_ledger and not self.show_in_orders
+
+
+class IgnoredOrderRule(TimestampedModel):
+    exchange_account = models.ForeignKey(
+        ExchangeAccount,
+        on_delete=models.CASCADE,
+        related_name="ignored_order_rules",
+    )
+    bybit_order_id = models.CharField(max_length=64)
+    reason = models.TextField()
+    include_in_ledger = models.BooleanField(default=False)
+    show_in_orders = models.BooleanField(default=False)
+    show_in_export = models.BooleanField(default=False)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["exchange_account", "bybit_order_id"],
+                name="unique_ignored_order_rule_per_account",
+            )
+        ]
+        ordering = ["bybit_order_id"]
+
+    def __str__(self):
+        return f"{self.bybit_order_id} ({self.exchange_account_id})"

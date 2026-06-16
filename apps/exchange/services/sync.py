@@ -61,7 +61,7 @@ class SyncService:
 
         try:
             self._sync_period(log, period_from, period_to)
-            normalize_account_orders(self.account)
+            normalize_account_orders(self.account, rebuild_ledger=False)
 
             self.account.last_successful_sync_at = period_to
             self.account.save(update_fields=["last_successful_sync_at", "updated_at"])
@@ -290,5 +290,5 @@ def fetch_all_missing_details(exchange_account: ExchangeAccount) -> int:
     order_ids = list(pending.values_list("bybit_order_id", flat=True).distinct())
     fetched, _ = fetch_order_details_for_ids(exchange_account, order_ids)
     if fetched:
-        normalize_account_orders(exchange_account)
+        normalize_account_orders(exchange_account, rebuild_ledger=False)
     return fetched

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.orders.models import P2POrder, RawP2POrder
+from apps.orders.models import IgnoredOrderRule, P2POrder, RawP2POrder
 
 
 @admin.register(RawP2POrder)
@@ -28,3 +28,17 @@ class P2POrderAdmin(admin.ModelAdmin):
             show_in_export=False,
             ignore_reason="Admin bulk ignore",
         )
+
+
+@admin.register(IgnoredOrderRule)
+class IgnoredOrderRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "bybit_order_id",
+        "exchange_account",
+        "applied_at",
+        "include_in_ledger",
+        "show_in_orders",
+        "show_in_export",
+    )
+    list_filter = ("exchange_account", "applied_at")
+    search_fields = ("bybit_order_id", "reason")

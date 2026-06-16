@@ -20,6 +20,15 @@ class ExchangeAccount(TimestampedModel):
     api_secret_encrypted = models.BinaryField(blank=True, default=b"")
     is_active = models.BooleanField(default=True)
     last_successful_sync_at = models.DateTimeField(null=True, blank=True)
+    ledger_start_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Orders before this Moscow-time boundary are excluded from ledger/UI/export.",
+    )
+    ledger_start_inclusive = models.BooleanField(
+        default=False,
+        help_text="If True, orders at ledger_start_at are also ignored (<= boundary).",
+    )
 
     class Meta:
         ordering = ["name"]
