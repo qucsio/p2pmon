@@ -1,6 +1,7 @@
 import logging
 import time
-from typing import Any
+from datetime import timedelta
+from typing import Any, Iterator
 
 from bybit_p2p import P2P
 
@@ -8,6 +9,14 @@ logger = logging.getLogger(__name__)
 
 COMPLETED_STATUS = 50
 PAGE_SIZE = 30
+
+# Bybit P2P simplifyList: do not query more than 89 days per request.
+MAX_QUERY_WINDOW_DAYS = 89
+# API may expose ~180 days of history; stay slightly under for safety.
+MAX_HISTORY_DAYS = 180
+SAFE_HISTORY_DAYS = 175
+
+# Bybit P2P read limit is 10 req/sec per UID; IP limit is 600 req/5 sec.
 PAGE_SLEEP_SECONDS = 1
 
 
@@ -58,4 +67,15 @@ class BybitClient:
 
     @staticmethod
     def page_sleep():
+        # Bybit P2P read limit is 10 req/sec per UID; IP limit is 600 req/5 sec.
         time.sleep(PAGE_SLEEP_SECONDS)
+
+
+def iter_query_windows(period_from, period_to) -> Iterator[tuple]:
+    """Split [period_from, period_to] into chunks of at most MAX_QUERY_WINDOW_DAYS."""
+    max_delta = timedelta(days=MAX_QUERY_WINDOW_DAYS)
+    cursor = period_from
+    while cursor < period_to:
+        window_end = min(cursor + max_delta, period_to)
+        yield cursor, window_end
+        cursor = window_end
