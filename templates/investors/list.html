@@ -15,28 +15,21 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Капитал фонда (equity)</div>
         <div class="val num">{{ equity|floatformat:0|intcomma }} ₽</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Всего юнитов (технич.)</div>
-        <div class="val num">{{ total_units|floatformat:2|intcomma }}</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Цена юнита (технич.)</div>
-        <div class="val num">{{ unit_price|floatformat:6 }} ₽</div></div>
 </div>
 
 {% if unassigned_residual %}
-<div class="alert alert-warning">Нераспределённая остаточная прибыль: <b class="num">{{ unassigned_residual|floatformat:0|intcomma }} ₽</b>{% if warnings %} — у инвесторов без получателя остатка: {{ warnings|join:", " }}. Укажите «Получатель остатка».{% endif %}</div>
+<div class="alert alert-warning">Нераспределённая остаточная прибыль: <b class="num">{{ unassigned_residual|floatformat:0|intcomma }} ₽</b>{% if warnings %} — {{ warnings|join:"; " }}{% endif %}</div>
 {% endif %}
 
 <div class="section-label">Экономический капитал (реальный баланс)</div>
-<div class="panel table-panel panel-pad-0" style="margin-bottom:24px;">
+<div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
     <thead><tr>
-        <th>Имя</th><th>Режим прибыли</th>
+        <th>Имя</th><th>Правило прибыли</th>
         <th class="text-end">Внешний капитал</th>
         <th class="text-end">Прибыль по соглашению</th>
         <th class="text-end">Экон. капитал</th>
-        <th class="text-end">Экон. PnL</th>
         <th class="text-end">Показано (net)</th>
         <th></th>
     </tr></thead>
@@ -44,46 +37,15 @@
     {% for r in rows %}
     <tr {% if not r.inv.is_active %}class="muted-row"{% endif %}>
         <td><a href="{% url 'investors:detail' r.inv.pk %}" style="color:var(--txt);font-weight:600;">{{ r.inv.name }}</a></td>
-        <td><span class="pill gray">{{ r.profit_mode }}</span></td>
+        <td><span class="pill gray">{{ r.rule_mode }}</span>{% if r.coeff and r.coeff != 1 %} <span class="num" style="color:var(--txt-3);">×{{ r.coeff|floatformat:2 }}</span>{% endif %}</td>
         <td class="num text-end">{{ r.net_external|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end {% if r.economic_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.economic_pnl|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end" style="font-weight:600;">{{ r.economic_capital|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end {% if r.economic_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.economic_pnl|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end">{{ r.displayed|floatformat:0|intcomma }} ₽</td>
         <td class="text-end"><a href="{% url 'investors:detail' r.inv.pk %}" class="btn-ghost btn-xs">Открыть</a></td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="8">Нет инвесторов</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
-</div>
-</div>
-
-<div class="section-label">Технические показатели (не капитал инвестора)</div>
-<div class="panel table-panel panel-pad-0">
-<div class="table-responsive">
-<table class="table">
-    <thead><tr>
-        <th>Имя</th>
-        <th class="text-end">Юниты</th>
-        <th class="text-end">Тех. доля</th>
-        <th class="text-end">Raw exposure</th>
-        <th class="text-end">Gross по весу</th>
-        <th class="text-end">Коэф.</th>
-        <th class="text-end">Передан остаток</th>
-    </tr></thead>
-    <tbody>
-    {% for r in rows %}
-    <tr {% if not r.inv.is_active %}class="muted-row"{% endif %}>
-        <td>{{ r.inv.name }}</td>
-        <td class="num text-end">{{ r.units|floatformat:2 }}</td>
-        <td class="num text-end">{{ r.technical_share|floatformat:2 }}%</td>
-        <td class="num text-end" style="color:var(--txt-3);">{{ r.raw_exposure|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.gross|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.coeff|floatformat:2 }}</td>
-        <td class="num text-end">{{ r.residual_out|floatformat:0|intcomma }} ₽</td>
-    </tr>
+    <tr class="empty-row"><td colspan="7">Нет инвесторов</td></tr>
     {% endfor %}
     </tbody>
 </table>

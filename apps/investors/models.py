@@ -10,49 +10,60 @@ from apps.common.models import TimestampedModel
 # Fund units carry more precision than money.
 DECIMAL_UNITS = {"max_digits": 30, "decimal_places": 8}
 
+PROFIT_SAME_AS_CAPITAL = "same_as_capital"
+PROFIT_MULTIPLIER = "multiplier"
+PROFIT_FIXED_PCT = "fixed_pct"
+PROFIT_NONE = "none"
+PROFIT_SPLIT = "split_from_investor"
+PROFIT_MODE_CHOICES = [
+    (PROFIT_SAME_AS_CAPITAL, "Как доля капитала"),
+    (PROFIT_MULTIPLIER, "Множитель от доли капитала"),
+    (PROFIT_FIXED_PCT, "Фиксированный процент"),
+    (PROFIT_NONE, "Без прибыли"),
+    (PROFIT_SPLIT, "Доля от прибыли другого инвестора"),
+]
+
+
+def _validate_profit_fields(mode, multiplier, fixed_pct, source_id, split_percent):
+    if mode == PROFIT_FIXED_PCT:
+        if fixed_pct is None or fixed_pct < 0 or fixed_pct > Decimal("100"):
+            raise ValidationError("Фиксированный процент прибыли должен быть в пределах 0–100%.")
+    if mode == PROFIT_MULTIPLIER and (multiplier is None or multiplier < 0):
+        raise ValidationError("Множитель прибыли не может быть отрицательным.")
+    if mode == PROFIT_SPLIT:
+        if not source_id:
+            raise ValidationError("Для режима «доля от прибыли» укажите источник.")
+        if split_percent is None or split_percent < 0 or split_percent > Decimal("100"):
+            raise ValidationError("Процент доли должен быть в пределах 0–100%.")
+
 
 class Investor(TimestampedModel):
-    PROFIT_SAME_AS_CAPITAL = "same_as_capital"
-    PROFIT_MULTIPLIER = "multiplier"
-    PROFIT_FIXED_PCT = "fixed_pct"
-    PROFIT_NONE = "none"
-    PROFIT_SPLIT = "split_from_investor"
-    PROFIT_MODE_CHOICES = [
-        (PROFIT_SAME_AS_CAPITAL, "Как доля капитала"),
-        (PROFIT_MULTIPLIER, "Множитель от доли капитала"),
-        (PROFIT_FIXED_PCT, "Фиксированный процент"),
-        (PROFIT_NONE, "Без прибыли"),
-        (PROFIT_SPLIT, "Доля от прибыли другого инвестора"),
-    ]
+    # Re-exported for backward compatibility.
+    PROFIT_SAME_AS_CAPITAL = PROFIT_SAME_AS_CAPITAL
+    PROFIT_MULTIPLIER = PROFIT_MULTIPLIER
+    PROFIT_FIXED_PCT = PROFIT_FIXED_PCT
+    PROFIT_NONE = PROFIT_NONE
+    PROFIT_SPLIT = PROFIT_SPLIT
+    PROFIT_MODE_CHOICES = PROFIT_MODE_CHOICES
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="investors",
-    )
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="investors")
     name = models.CharField(max_length=128)
-    # Deprecated: kept for backward compat / migration. Use capital units instead.
-    share_percent = models.DecimalField(**settings.DECIMAL_RATE, default=0)
 
+    # Current/default profit agreement. Used as the open-ended fallback rule when
+    # the investor has no dated InvestorProfitRule rows. For historically-correct
+    # changes, add an InvestorProfitRule with effective_from instead.
     profit_share_mode = models.CharField(
-        max_length=20, choices=PROFIT_MODE_CHOICES, default=PROFIT_SAME_AS_CAPITAL
-    )
+        max_length=20, choices=PROFIT_MODE_CHOICES, default=PROFIT_SAME_AS_CAPITAL)
     profit_share_multiplier = models.DecimalField(**settings.DECIMAL_RATE, default=Decimal("1"))
-    profit_share_fixed_pct = models.DecimalField(
-        **settings.DECIMAL_RATE, null=True, blank=True
-    )
-    # For split_from_investor: receive `split_percent` of source_investor's profit.
+    profit_share_fixed_pct = models.DecimalField(**settings.DECIMAL_RATE, null=True, blank=True)
     source_investor = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="profit_recipients",
-    )
+        related_name="profit_recipients")
     split_percent = models.DecimalField(**settings.DECIMAL_RATE, null=True, blank=True)
-    # Where the un-assigned (residual) part of this investor's gross profit goes,
-    # e.g. a multiplier<1 investor's leftover. If unset → flagged as unassigned.
     residual_investor = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="residual_recipients",
-    )
+        related_name="residual_recipients")
 
     is_active = models.BooleanField(default=True)
     comment = models.TextField(blank=True)
@@ -64,73 +75,95 @@ class Investor(TimestampedModel):
         return self.name
 
     def clean(self):
-        if self.profit_share_mode == self.PROFIT_FIXED_PCT:
-            pct = self.profit_share_fixed_pct
-            if pct is None:
-                raise ValidationError("Укажите фиксированный процент прибыли.")
-            if pct < 0 or pct > Decimal("100"):
-                raise ValidationError("Фиксированный процент прибыли должен быть в пределах 0–100%.")
-        if self.profit_share_mode == self.PROFIT_MULTIPLIER and self.profit_share_multiplier < 0:
-            raise ValidationError("Множитель прибыли не может быть отрицательным.")
-        if self.profit_share_mode == self.PROFIT_SPLIT:
-            if not self.source_investor_id:
-                raise ValidationError("Для режима «доля от прибыли» укажите источник.")
-            if self.split_percent is None or self.split_percent < 0 or self.split_percent > Decimal("100"):
-                raise ValidationError("Процент доли должен быть в пределах 0–100%.")
+        _validate_profit_fields(
+            self.profit_share_mode, self.profit_share_multiplier,
+            self.profit_share_fixed_pct, self.source_investor_id, self.split_percent)
 
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
 
-    # --- Capital (unit-based) ---
     @property
     def units(self) -> Decimal:
         # Units come ONLY from real capital events (deposit/withdrawal/correction).
-        capital_types = [
-            InvestorCapitalTransaction.TYPE_DEPOSIT,
-            InvestorCapitalTransaction.TYPE_WITHDRAWAL,
-            InvestorCapitalTransaction.TYPE_CORRECTION,
-        ]
         return (
-            self.capital_transactions.filter(type__in=capital_types)
-            .aggregate(t=Sum("units_delta"))["t"]
+            self.capital_transactions.filter(type__in=[
+                InvestorCapitalTransaction.TYPE_DEPOSIT,
+                InvestorCapitalTransaction.TYPE_WITHDRAWAL,
+                InvestorCapitalTransaction.TYPE_CORRECTION,
+            ]).aggregate(t=Sum("units_delta"))["t"]
             or Decimal("0")
         )
 
-    # NOTE: lifetime profit & economic capital are NOT derived from ProfitAllocation
-    # rows. They are computed live in services.investor_report() over automatic
-    # intervals (economic_capital = external_capital + assigned_profit).
+    # Lifetime profit & economic capital are computed live in
+    # services.investor_report() — never from stored allocation rows.
+
+
+class InvestorProfitRule(TimestampedModel):
+    """Versioned (effective-dated) profit agreement. The applicable rule for a
+    given day is the one whose [effective_from, effective_to] contains that day.
+    Editing it does NOT change units; it only affects profit attribution from its
+    effective date forward, so history is not rewritten retroactively."""
+
+    investor = models.ForeignKey(
+        Investor, on_delete=models.CASCADE, related_name="profit_rules")
+    mode = models.CharField(max_length=20, choices=PROFIT_MODE_CHOICES,
+                            default=PROFIT_SAME_AS_CAPITAL)
+    profit_share_multiplier = models.DecimalField(**settings.DECIMAL_RATE, default=Decimal("1"))
+    profit_share_fixed_pct = models.DecimalField(**settings.DECIMAL_RATE, null=True, blank=True)
+    source_investor = models.ForeignKey(
+        Investor, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="rule_profit_sources")
+    split_percent = models.DecimalField(**settings.DECIMAL_RATE, null=True, blank=True)
+    residual_investor = models.ForeignKey(
+        Investor, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="rule_residual_targets")
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["investor", "effective_from"]
+
+    def __str__(self):
+        return f"{self.investor.name}: {self.mode} from {self.effective_from}"
+
+    def clean(self):
+        _validate_profit_fields(
+            self.mode, self.profit_share_multiplier, self.profit_share_fixed_pct,
+            self.source_investor_id, self.split_percent)
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError("Дата окончания раньше даты начала.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class InvestorCapitalTransaction(TimestampedModel):
     TYPE_DEPOSIT = "deposit"
     TYPE_WITHDRAWAL = "withdrawal"
+    TYPE_CORRECTION = "correction"
+    # Legacy strings kept ONLY so historical rows still load. Never created now;
+    # they carry no units and are ignored by every report.
     TYPE_PROFIT_REINVEST = "profit_reinvest"
     TYPE_PROFIT_PAYOUT = "profit_payout"
-    TYPE_CORRECTION = "correction"
     TYPE_CHOICES = [
         (TYPE_DEPOSIT, "Депозит"),
         (TYPE_WITHDRAWAL, "Вывод"),
-        (TYPE_PROFIT_REINVEST, "Реинвест прибыли"),
-        (TYPE_PROFIT_PAYOUT, "Выплата прибыли"),
         (TYPE_CORRECTION, "Корректировка"),
     ]
 
     investor = models.ForeignKey(
-        Investor, on_delete=models.CASCADE, related_name="capital_transactions"
-    )
+        Investor, on_delete=models.CASCADE, related_name="capital_transactions")
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     amount_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
     units_delta = models.DecimalField(**DECIMAL_UNITS, default=0)
     unit_price = models.DecimalField(**DECIMAL_UNITS, default=0)
     effective_at = models.DateTimeField()
     linked_ledger_adjustment = models.ForeignKey(
-        "ledger.LedgerAdjustment",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="investor_transactions",
-    )
+        "ledger.LedgerAdjustment", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="investor_transactions")
     comment = models.TextField(blank=True)
 
     class Meta:
@@ -140,23 +173,9 @@ class InvestorCapitalTransaction(TimestampedModel):
         return f"{self.investor.name} {self.type} {self.amount_rub}₽ ({self.units_delta} u)"
 
 
-def active_share_total(user, exclude_pk=None) -> Decimal:
-    qs = Investor.objects.filter(user=user, is_active=True)
-    if exclude_pk:
-        qs = qs.exclude(pk=exclude_pk)
-    return qs.aggregate(total=Sum("share_percent"))["total"] or Decimal("0")
-
-
-def shares_fully_allocated(user) -> bool:
-    return active_share_total(user) == Decimal("100")
-
-
 class TaxSetting(TimestampedModel):
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="tax_settings",
-    )
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tax_settings")
     name = models.CharField(max_length=128)
     tax_rate = models.DecimalField(**settings.DECIMAL_RATE)
     effective_from = models.DateField()
@@ -169,88 +188,3 @@ class TaxSetting(TimestampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.tax_rate * 100}%)"
-
-
-class ProfitAllocation(models.Model):
-    # A capital investor's own share is already in NAV → retained, not payable.
-    STATUS_RETAINED = "retained_in_capital"
-    # Profit owed to a non-capital participant (split/fixed) → a real claim.
-    STATUS_UNPAID_CLAIM = "unpaid_claim"
-    STATUS_PAID_OUT = "paid_out"
-    STATUS_REINVESTED = "reinvested"
-    # Legacy value kept only so old rows load; no longer assigned.
-    STATUS_UNPAID = "unpaid"
-    STATUS_CHOICES = [
-        (STATUS_RETAINED, "В капитале (NAV)"),
-        (STATUS_UNPAID_CLAIM, "Невыплаченное требование"),
-        (STATUS_PAID_OUT, "Выплачено"),
-        (STATUS_REINVESTED, "Реинвестировано"),
-        (STATUS_UNPAID, "Не выплачено (устар.)"),
-    ]
-    # Statuses that represent a payable claim (settle-able).
-    CLAIM_STATUSES = (STATUS_UNPAID_CLAIM,)
-
-    period_from = models.DateField()
-    period_to = models.DateField()
-    investor = models.ForeignKey(
-        Investor,
-        on_delete=models.CASCADE,
-        related_name="allocations",
-    )
-    # share_percent kept as the effective profit share (legacy column name).
-    share_percent = models.DecimalField(**settings.DECIMAL_RATE, default=0)
-    capital_share_pct = models.DecimalField(**settings.DECIMAL_RATE, default=0)
-    profit_share_pct = models.DecimalField(**settings.DECIMAL_RATE, default=0)
-    gross_profit = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    fees_part = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    tax_part = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    net_profit = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_RETAINED)
-    settled_at = models.DateTimeField(null=True, blank=True)
-    settlement_txn = models.ForeignKey(
-        InvestorCapitalTransaction,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="settled_allocation",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-period_from", "investor__name"]
-
-    def __str__(self):
-        return f"{self.investor.name} {self.period_from} - {self.period_to}"
-
-
-class InvestorPositionSnapshot(models.Model):
-    """Frozen, auditable per-period position + profit for one investor."""
-    period_from = models.DateField()
-    period_to = models.DateField()
-    investor = models.ForeignKey(
-        Investor, on_delete=models.CASCADE, related_name="position_snapshots"
-    )
-    opening_units = models.DecimalField(**DECIMAL_UNITS, default=0)
-    closing_units = models.DecimalField(**DECIMAL_UNITS, default=0)
-    unit_price = models.DecimalField(**DECIMAL_UNITS, default=0)
-    capital_value_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    capital_share_pct = models.DecimalField(**settings.DECIMAL_RATE, default=0)
-    profit_share_pct = models.DecimalField(**settings.DECIMAL_RATE, default=0)
-    earned_profit_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    cumulative_earned_profit_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    paid_out_profit_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    reinvested_profit_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    unpaid_profit_rub = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-period_to", "investor__name"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["investor", "period_from", "period_to"],
-                name="unique_position_snapshot_period",
-            )
-        ]
-
-    def __str__(self):
-        return f"{self.investor.name} {self.period_from}–{self.period_to}"

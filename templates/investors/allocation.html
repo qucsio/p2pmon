@@ -30,7 +30,7 @@
 <table class="table">
     <thead><tr>
         <th>Инвестор</th><th>Режим</th>
-        <th class="text-end">Gross по весу</th><th class="text-end">Коэф.</th>
+        <th class="text-end">Gross по участию</th><th class="text-end">Коэф.</th>
         <th class="text-end">Назначено (экон.)</th><th class="text-end">Остаток →</th>
         <th class="text-end">Показано (net)</th><th>Источник</th>
     </tr></thead>
@@ -39,7 +39,7 @@
     <tr>
         <td>{{ r.investor.name }}</td>
         <td><span class="pill gray">{{ r.investor.get_profit_share_mode_display }}</span></td>
-        <td class="num text-end {% if r.gross_by_weight >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross_by_weight|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.gross_by_participation >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross_by_participation|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end">{{ r.profit_coeff|floatformat:2 }}</td>
         <td class="num text-end {% if r.assigned_profit >= 0 %}pos{% else %}neg{% endif %}">{{ r.assigned_profit|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end">{{ r.residual_out|floatformat:0|intcomma }} ₽</td>

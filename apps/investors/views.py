@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.common.helpers import get_active_account
 from apps.investors import services
-from apps.investors.models import Investor, InvestorCapitalTransaction
+from apps.investors.models import Investor, InvestorCapitalTransaction, InvestorProfitRule
 from apps.ledger.models import LedgerAdjustment
 from apps.ledger.tasks import rebuild_ledger
 
@@ -48,6 +48,36 @@ class InvestorForm(forms.ModelForm):
             self.fields[f].required = False
 
 
+class ProfitRuleForm(forms.ModelForm):
+    class Meta:
+        model = InvestorProfitRule
+        fields = (
+            "mode", "profit_share_multiplier", "profit_share_fixed_pct",
+            "source_investor", "split_percent", "residual_investor",
+            "effective_from", "effective_to", "comment",
+        )
+        widgets = {
+            "effective_from": forms.DateInput(attrs={"type": "date"}),
+            "effective_to": forms.DateInput(attrs={"type": "date"}),
+        }
+        labels = {
+            "mode": "Режим", "profit_share_multiplier": "Множитель",
+            "profit_share_fixed_pct": "Фикс. %", "source_investor": "Источник",
+            "split_percent": "% сплита", "residual_investor": "Получатель остатка",
+            "effective_from": "Действует с", "effective_to": "Действует по",
+            "comment": "Комментарий",
+        }
+
+    def __init__(self, *args, user=None, investor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        qs = Investor.objects.filter(user=user) if user else Investor.objects.none()
+        if investor is not None:
+            qs = qs.exclude(pk=investor.pk)
+        for f in ("source_investor", "residual_investor"):
+            self.fields[f].queryset = qs
+            self.fields[f].required = False
+
+
 class CapitalTxnForm(forms.Form):
     amount_rub = forms.DecimalField(min_value=Decimal("0.01"), label="Сумма, ₽")
     effective_at = forms.DateTimeField(
@@ -70,24 +100,20 @@ def investor_list(request):
     rep = services.investor_report(request.user, account)
     rows = []
     for r in rep["rows"]:
-        inv = r["investor"]
         rows.append({
-            "inv": inv,
+            "inv": r["investor"],
             "economic_capital": r["economic_capital"],
             "net_external": r["net_external_capital"],
             "economic_pnl": r["economic_pnl"],
+            "gross": r["gross_by_participation"],
             "displayed": r["displayed_net"],
-            "units": r["units"],
-            "technical_share": r["technical_share"],
-            "raw_exposure": r["raw_exposure_value"],
-            "gross": r["gross_by_weight"],
             "coeff": r["profit_coeff"],
             "residual_out": r["residual_out"],
-            "profit_mode": inv.get_profit_share_mode_display(),
+            "rule_mode": r["rule_mode"],
+            "residual_investor": r["residual_investor"],
         })
     return render(request, "investors/list.html", {
         "rows": rows, "equity": rep["equity"],
-        "unit_price": rep["unit_price"], "total_units": rep["total_units"],
         "unassigned_residual": rep["unassigned_residual"], "warnings": rep["warnings"],
     })
 
@@ -131,11 +157,37 @@ def investor_detail(request, pk):
         "investor": investor,
         "row": row,
         "txns": list(reversed(txns)),
+        "rules": investor.profit_rules.all(),
+        "rule_form": ProfitRuleForm(user=request.user, investor=investor),
         "cap_labels": json.dumps(rep["series_labels"]),
         "cap_values": json.dumps(rep["econ_series"].get(investor.id, [])),
         "earn_labels": json.dumps(rep["series_labels"]),
         "earn_values": json.dumps(rep["disp_series"].get(investor.id, [])),
     })
+
+
+@login_required
+def rule_create(request, pk):
+    investor = get_object_or_404(Investor, pk=pk, user=request.user)
+    form = ProfitRuleForm(request.POST or None, user=request.user, investor=investor)
+    if request.method == "POST" and form.is_valid():
+        rule = form.save(commit=False)
+        rule.investor = investor
+        rule.save()
+        messages.success(request, "Правило прибыли добавлено.")
+    elif request.method == "POST":
+        messages.error(request, "; ".join(str(e) for e in form.errors.values()))
+    return redirect("investors:detail", pk=pk)
+
+
+@login_required
+def rule_delete(request, pk):
+    rule = get_object_or_404(InvestorProfitRule, pk=pk, investor__user=request.user)
+    inv_pk = rule.investor_id
+    if request.method == "POST":
+        rule.delete()
+        messages.success(request, "Правило удалено.")
+    return redirect("investors:detail", pk=inv_pk)
 
 
 @login_required

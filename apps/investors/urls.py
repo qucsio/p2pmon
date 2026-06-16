@@ -11,6 +11,8 @@ urlpatterns = [
     path("<int:pk>/edit/", views.investor_edit, name="edit"),
     path("<int:pk>/deposit/", views.investor_deposit, name="deposit"),
     path("<int:pk>/withdraw/", views.investor_withdraw, name="withdraw"),
+    path("<int:pk>/rule/add/", views.rule_create, name="rule_create"),
+    path("rule/<int:pk>/delete/", views.rule_delete, name="rule_delete"),
     path("history/", views.contribution_history, name="history"),
     path("report/", views.profit_report_view, name="allocation"),
 ]

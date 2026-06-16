@@ -16,43 +16,31 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Экономический капитал</div>
         <div class="val num">{{ row.economic_capital|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">внешний капитал + назначенная прибыль</div></div>
+        <div class="sub">внешний капитал + прибыль по соглашению</div></div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Внешний капитал (нетто)</div>
         <div class="val num">{{ row.net_external_capital|default:0|floatformat:0|intcomma }} ₽</div>
         <div class="sub">депозиты − выводы ± корректировки</div></div>
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Прибыль по соглашению</div>
+        <div class="label">Прибыль по соглашению (экон. PnL)</div>
         <div class="val num {% if row.assigned_profit >= 0 %}pos{% else %}neg{% endif %}">{{ row.assigned_profit|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">экон. PnL</div></div>
+        <div class="sub">валовая по участию: <b class="num">{{ row.gross_by_participation|default:0|floatformat:0|intcomma }} ₽</b></div></div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Показанная прибыль (net)</div>
         <div class="val num {% if row.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ row.displayed_net|default:0|floatformat:0|intcomma }} ₽</div>
         {% if row.source_investor %}<div class="sub">источник: {{ row.source_investor.name }}</div>{% endif %}</div>
 </div>
 
-<div class="section-label">Технические показатели (не капитал инвестора)</div>
-<div class="kpi-grid" style="margin-bottom:22px;">
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Юниты / тех. доля</div>
-        <div class="val num">{{ row.units|default:0|floatformat:2 }}</div>
-        <div class="sub">доля: <b class="num">{{ row.technical_share|default:0|floatformat:2 }}%</b></div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Raw exposure (технич.)</div>
-        <div class="val num" style="color:var(--txt-2);">{{ row.raw_exposure_value|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">units × цена юнита — НЕ капитал</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Gross по весу · коэф.</div>
-        <div class="val num">{{ row.gross_by_weight|default:0|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">коэф.: <b class="num">{{ row.profit_coeff|default:0|floatformat:2 }}</b> · передан остаток: <b class="num">{{ row.residual_out|default:0|floatformat:0|intcomma }} ₽</b></div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Получен остаток</div>
-        <div class="val num">{{ row.residual_in|default:0|floatformat:0|intcomma }} ₽</div></div>
+<div class="panel" style="margin-bottom:22px;display:flex;gap:24px;flex-wrap:wrap;">
+    <div><p class="panel-sub">Активное правило</p><div style="font-weight:600;">{{ row.rule_mode }}{% if row.profit_coeff and row.profit_coeff != 1 %} · ×{{ row.profit_coeff|floatformat:2 }}{% endif %}</div></div>
+    {% if row.residual_investor %}<div><p class="panel-sub">Получатель остатка</p><div style="font-weight:600;">{{ row.residual_investor.name }}</div></div>{% endif %}
+    <div><p class="panel-sub">Передан остаток</p><div class="num" style="font-weight:600;">{{ row.residual_out|default:0|floatformat:0|intcomma }} ₽</div></div>
+    <div><p class="panel-sub">Получен остаток</p><div class="num" style="font-weight:600;">{{ row.residual_in|default:0|floatformat:0|intcomma }} ₽</div></div>
 </div>
 
 <div class="row g-3" style="margin-bottom:22px;">
     <div class="col-xl-6"><div class="panel">
-        <div class="panel-head"><div><p class="panel-sub">Капитал</p><h3 class="panel-title">Капитал во времени</h3></div></div>
+        <div class="panel-head"><div><p class="panel-sub">Капитал</p><h3 class="panel-title">Экон. капитал во времени</h3></div></div>
         <div class="chart-box" style="height:230px;"><canvas id="capChart"></canvas></div>
     </div></div>
     <div class="col-xl-6"><div class="panel">
@@ -61,23 +49,52 @@
     </div></div>
 </div>
 
+<div class="section-label">Правила прибыли (история соглашений)</div>
+<div class="panel table-panel panel-pad-0" style="margin-bottom:14px;">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>С даты</th><th>По дату</th><th>Режим</th><th class="text-end">Коэф/%</th><th>Источник</th><th>Остаток →</th><th></th></tr></thead>
+    <tbody>
+    {% for rl in rules %}
+    <tr>
+        <td class="num">{{ rl.effective_from|date:"d.m.Y" }}</td>
+        <td class="num">{% if rl.effective_to %}{{ rl.effective_to|date:"d.m.Y" }}{% else %}—{% endif %}</td>
+        <td>{{ rl.get_mode_display }}</td>
+        <td class="num text-end">{% if rl.mode == 'multiplier' %}×{{ rl.profit_share_multiplier|floatformat:2 }}{% elif rl.mode == 'fixed_pct' %}{{ rl.profit_share_fixed_pct|floatformat:2 }}%{% elif rl.mode == 'split_from_investor' %}{{ rl.split_percent|floatformat:2 }}%{% else %}—{% endif %}</td>
+        <td>{% if rl.source_investor %}{{ rl.source_investor.name }}{% else %}—{% endif %}</td>
+        <td>{% if rl.residual_investor %}{{ rl.residual_investor.name }}{% else %}—{% endif %}</td>
+        <td class="text-end"><form method="post" action="{% url 'investors:rule_delete' rl.pk %}" style="display:inline;">{% csrf_token %}<button class="btn-ghost btn-xs danger">Удалить</button></form></td>
+    </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="7">Нет дат правил — используется текущая настройка инвестора</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+<div class="panel" style="margin-bottom:22px;">
+    <p class="panel-sub" style="margin-bottom:10px;">Добавить правило (с даты)</p>
+    <form method="post" action="{% url 'investors:rule_create' investor.pk %}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">{% csrf_token %}
+        {% for f in rule_form %}<div class="form-field" style="margin:0;"><label class="form-label">{{ f.label }}</label>{{ f }}</div>{% endfor %}
+        <button class="btn-accent" type="submit">Добавить</button>
+    </form>
+</div>
+
 <div class="section-label">Движения капитала</div>
 <div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
-    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма</th><th class="text-end">Δ юнитов</th><th class="text-end">Цена юнита</th><th>Комментарий</th></tr></thead>
+    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма</th><th>Комментарий</th></tr></thead>
     <tbody>
     {% for t in txns %}
     <tr>
         <td class="num">{{ t.effective_at|date:"d.m.Y H:i" }}</td>
         <td><span class="pill gray">{{ t.get_type_display }}</span></td>
         <td class="num text-end">{{ t.amount_rub|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end {% if t.units_delta >= 0 %}pos{% else %}neg{% endif %}">{{ t.units_delta|floatformat:2 }}</td>
-        <td class="num text-end">{{ t.unit_price|floatformat:6 }}</td>
         <td style="color:var(--txt-2);">{{ t.comment|truncatechars:48 }}</td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="6">Нет движений капитала</td></tr>
+    <tr class="empty-row"><td colspan="4">Нет движений капитала</td></tr>
     {% endfor %}
     </tbody>
 </table>

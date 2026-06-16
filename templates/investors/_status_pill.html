@@ -1,5 +1,0 @@
-{% if status == 'paid_out' %}<span class="pill green">Выплачено</span>
-{% elif status == 'reinvested' %}<span class="pill" style="color:var(--blue);background:var(--blue-soft);">Реинвест.</span>
-{% elif status == 'unpaid_claim' %}<span class="pill" style="color:var(--yellow);background:rgba(245,185,72,.14);">Требование</span>
-{% elif status == 'retained_in_capital' %}<span class="pill gray">В капитале (NAV)</span>
-{% else %}<span class="pill gray">Не выплачено</span>{% endif %}
