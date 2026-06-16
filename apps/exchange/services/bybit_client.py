@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 COMPLETED_STATUS = 50
 PAGE_SIZE = 30
 
-# Bybit P2P simplifyList: do not query more than 89 days per request.
-MAX_QUERY_WINDOW_DAYS = 89
+# Bybit P2P simplifyList: query window must not exceed 90 days (use 88 for margin).
+MAX_QUERY_WINDOW_DAYS = 88
 # API may expose ~180 days of history; stay slightly under for safety.
 MAX_HISTORY_DAYS = 180
 SAFE_HISTORY_DAYS = 175
