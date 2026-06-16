@@ -4,8 +4,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
-from django.db.models.functions import TruncDate
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate, TruncMonth
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -123,7 +123,18 @@ def dashboard(request):
     sum_net_profit = sum((s.net_profit_after_tax for s in snapshots), Decimal("0"))
     sum_volume = sum((s.volume_rub for s in snapshots), Decimal("0"))
 
+    order_count = 0
+    if account:
+        oc_qs = P2POrder.objects.filter(
+            exchange_account=account, include_in_ledger=True,
+            created_at_moscow__date__lte=date_to,
+        )
+        if date_from is not None:
+            oc_qs = oc_qs.filter(created_at_moscow__date__gte=date_from)
+        order_count = oc_qs.count()
+
     context = {
+        "order_count": order_count,
         "sum_equity_pnl": sum_equity_pnl,
         "sum_equity_pnl_clean": sum_equity_pnl_clean,
         "sum_net_profit": sum_net_profit,
@@ -193,9 +204,12 @@ def volumes(request):
     today = timezone.localdate()
     period, date_from, date_to = _resolve_range(request, "year", today)
 
-    # Daily buy / sell volume in RUB computed live from completed orders.
+    # Daily buy / sell volume in RUB + order counts, computed live from orders.
     buy = defaultdict(float)
     sell = defaultdict(float)
+    n_buy = defaultdict(int)
+    n_sell = defaultdict(int)
+    total_orders = 0
     if account:
         order_qs = P2POrder.objects.filter(
             exchange_account=account,
@@ -207,20 +221,29 @@ def volumes(request):
         rows = (
             order_qs.annotate(d=TruncDate("created_at_moscow"))
             .values("d", "side")
-            .annotate(total=Sum("amount_rub"))
+            .annotate(total=Sum("amount_rub"), cnt=Count("id"))
         )
         for r in rows:
-            bucket = buy if r["side"] == P2POrder.SIDE_BUY else sell
-            bucket[r["d"]] += float(r["total"] or 0)
+            if r["side"] == P2POrder.SIDE_BUY:
+                buy[r["d"]] += float(r["total"] or 0)
+                n_buy[r["d"]] += r["cnt"]
+            else:
+                sell[r["d"]] += float(r["total"] or 0)
+                n_sell[r["d"]] += r["cnt"]
+            total_orders += r["cnt"]
 
     days = sorted(set(buy) | set(sell))
     cal = []
     total_buy = total_sell = 0.0
     for d in days:
         b, s = buy.get(d, 0.0), sell.get(d, 0.0)
+        nb, ns = n_buy.get(d, 0), n_sell.get(d, 0)
         total_buy += b
         total_sell += s
-        cal.append({"date": d.isoformat(), "buy": b, "sell": s, "total": b + s})
+        cal.append({
+            "date": d.isoformat(), "buy": b, "sell": s, "total": b + s,
+            "n_buy": nb, "n_sell": ns, "n": nb + ns,
+        })
 
     total_all = total_buy + total_sell
     active_days = len([c for c in cal if c["total"] > 0])
@@ -236,6 +259,7 @@ def volumes(request):
         "total_all": total_all,
         "active_days": active_days,
         "avg_per_day": (total_all / active_days) if active_days else 0,
+        "total_orders": total_orders,
     })
 
 
@@ -248,11 +272,69 @@ def daily_report(request):
     return render(request, "reports/daily_report.html", {"account": account, "rows": rows})
 
 
+def _week_sort_key(week_str):
+    """Parse '2026-W05' → (2026, 5); tolerant of non-padded legacy values."""
+    try:
+        y, w = week_str.split("-W")
+        return (int(y), int(w))
+    except (ValueError, AttributeError):
+        return (0, 0)
+
+
 @login_required
 def weekly_report(request):
     account = get_active_account(request.user)
     rows = []
     if account:
         from apps.ledger.models import WeeklySnapshot
-        rows = WeeklySnapshot.objects.filter(exchange_account=account).order_by("-week")[:52]
+        qs = list(WeeklySnapshot.objects.filter(exchange_account=account))
+        qs.sort(key=lambda s: _week_sort_key(s.week), reverse=True)
+        rows = qs[:52]
     return render(request, "reports/weekly_report.html", {"account": account, "rows": rows})
+
+
+@login_required
+def monthly_report(request):
+    account = get_active_account(request.user)
+    months = []
+    if account:
+        snaps = DailySnapshot.objects.filter(exchange_account=account).order_by("day")
+        # Order counts per month.
+        oc = {}
+        for r in (
+            P2POrder.objects.filter(exchange_account=account, include_in_ledger=True)
+            .annotate(m=TruncMonth("created_at_moscow"))
+            .values("m")
+            .annotate(cnt=Count("id"))
+        ):
+            if r["m"]:
+                oc[(r["m"].year, r["m"].month)] = r["cnt"]
+
+        groups = {}
+        for s in snaps:
+            key = (s.day.year, s.day.month)
+            groups.setdefault(key, []).append(s)
+
+        ru_months = [
+            "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+            "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+        ]
+        for key in sorted(groups, reverse=True):
+            g = groups[key]
+            last = g[-1]
+            months.append({
+                "year": key[0],
+                "month": key[1],
+                "name": f"{ru_months[key[1] - 1]} {key[0]}",
+                "label": date(key[0], key[1], 1),
+                "equity_pnl": sum((x.daily_total_equity_pnl for x in g), Decimal("0")),
+                "realized": sum((x.daily_wac_realized_pnl for x in g), Decimal("0")),
+                "fees": sum((x.fees for x in g), Decimal("0")),
+                "net": sum((x.net_profit_after_tax for x in g), Decimal("0")),
+                "volume": sum((x.volume_rub for x in g), Decimal("0")),
+                "equity_end": last.total_equity,
+                "orders": oc.get(key, 0),
+                "active_days": len(g),
+            })
+
+    return render(request, "reports/monthly_report.html", {"account": account, "months": months})

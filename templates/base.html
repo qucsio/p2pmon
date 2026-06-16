@@ -150,6 +150,14 @@
     .muted-row{opacity:.5;}
     .empty-row td{color:var(--txt-3);text-align:center;padding:26px!important;}
 
+    /* scrollable table with sticky header + sortable columns */
+    .table-scroll{max-height:74vh;overflow:auto;border-radius:var(--radius);}
+    .table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--panel-2);box-shadow:0 1px 0 var(--border);}
+    table.sortable thead th{cursor:pointer;user-select:none;white-space:nowrap;}
+    table.sortable thead th .arr{opacity:.35;font-size:8px;margin-left:4px;}
+    table.sortable thead th.sorted{color:var(--txt);}
+    table.sortable thead th.sorted .arr{opacity:1;color:var(--accent);}
+
     /* toggle switch */
     .switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;color:var(--txt-2);user-select:none;}
     .switch input{display:none;}
@@ -258,6 +266,9 @@
             <a class="side-link {% if 'weekly' in request.path %}active{% endif %}" href="{% url 'reports:weekly_report' %}">
                 <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9h16" stroke="currentColor" stroke-width="1.8"/></svg>
                 Недельный отчёт</a>
+            <a class="side-link {% if 'monthly' in request.path %}active{% endif %}" href="{% url 'reports:monthly_report' %}">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9h16M9 13h2M13 13h2M9 17h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Месячный отчёт</a>
             <a class="side-link {% if 'sync' in request.path %}active{% endif %}" href="{% url 'exchange:sync_logs' %}">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 Синхронизация</a>
@@ -314,6 +325,40 @@ if (window.Chart) {
     Chart.defaults.font.size = 11;
     Chart.defaults.borderColor = 'rgba(255,255,255,.05)';
 }
+</script>
+<script>
+// Generic client-side table sorting for <table class="sortable">.
+function _cellVal(cell){
+    if (cell.dataset.sort !== undefined) return parseFloat(cell.dataset.sort);
+    const s = cell.textContent.trim();
+    let m;
+    if ((m = s.match(/^(\d{4})-W(\d+)$/))) return (+m[1])*100 + (+m[2]);          // 2026-W05
+    if ((m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/))) return +(m[3]+m[2]+m[1]);     // dd.mm.yyyy
+    const n = parseFloat(s.replace(/\s/g,'').replace('₽','').replace(',','.'));
+    return isNaN(n) ? s.toLowerCase() : n;
+}
+document.querySelectorAll('table.sortable').forEach(table=>{
+    const ths = table.tHead.rows[0].cells;
+    [...ths].forEach((th,i)=>{
+        if (th.dataset.nosort !== undefined) return;
+        const arr = document.createElement('span'); arr.className='arr'; arr.textContent='▲';
+        th.appendChild(arr);
+        th.addEventListener('click', ()=>{
+            const tb = table.tBodies[0];
+            const rows = [...tb.rows].filter(r=>!r.classList.contains('empty-row'));
+            const asc = th.dataset.asc !== '1';
+            [...ths].forEach(h=>{h.classList.remove('sorted'); delete h.dataset.asc;});
+            th.classList.add('sorted'); th.dataset.asc = asc ? '1' : '0';
+            th.querySelector('.arr').textContent = asc ? '▲' : '▼';
+            rows.sort((a,b)=>{
+                const x=_cellVal(a.cells[i]), y=_cellVal(b.cells[i]);
+                if (typeof x==='number' && typeof y==='number') return asc ? x-y : y-x;
+                return asc ? String(x).localeCompare(String(y)) : String(y).localeCompare(String(x));
+            });
+            rows.forEach(r=>tb.appendChild(r));
+        });
+    });
+});
 </script>
 {% block extra_js %}{% endblock %}
 </body>

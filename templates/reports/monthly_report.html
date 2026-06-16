@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Месячный отчёт{% endblock %}
+{% block heading %}Месячный отчёт{% endblock %}
+{% block content %}
+
+{% if not months %}
+<div class="panel"><p class="empty-row" style="margin:0;color:var(--txt-3);">Нет данных</p></div>
+{% else %}
+<div class="month-grid">
+    {% for m in months %}
+    <div class="month-card">
+        <div class="mc-head">
+            <span class="mc-name">{{ m.name }}</span>
+            <span class="pill gray">{{ m.orders }} орд.</span>
+        </div>
+        <div class="mc-hero">
+            <div class="mc-hero-label">Чистая прибыль (после налога)</div>
+            <div class="mc-hero-val num {% if m.net >= 0 %}pos{% else %}neg{% endif %}">{{ m.net|floatformat:0|intcomma }} ₽</div>
+        </div>
+        <div class="mc-rows">
+            <div><span>Equity PnL (Δ)</span><b class="num {% if m.equity_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ m.equity_pnl|floatformat:0|intcomma }} ₽</b></div>
+            <div><span>Realized WAC</span><b class="num {% if m.realized >= 0 %}pos{% else %}neg{% endif %}">{{ m.realized|floatformat:0|intcomma }} ₽</b></div>
+            <div><span>Комиссии</span><b class="num">{{ m.fees|floatformat:0|intcomma }} ₽</b></div>
+            <div><span>Объём</span><b class="num">{{ m.volume|floatformat:0|intcomma }} ₽</b></div>
+            <div><span>Equity на конец</span><b class="num">{{ m.equity_end|floatformat:0|intcomma }} ₽</b></div>
+            <div><span>Активных дней</span><b class="num">{{ m.active_days }}</b></div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<style>
+.month-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));}
+.month-card{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px;transition:border-color .15s,transform .15s;}
+.month-card:hover{border-color:var(--border);transform:translateY(-2px);}
+.mc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.mc-name{font-size:15px;font-weight:600;}
+.mc-hero{padding:12px 0 14px;border-bottom:1px solid var(--border-soft);margin-bottom:12px;}
+.mc-hero-label{font-size:11px;color:var(--txt-3);margin-bottom:6px;}
+.mc-hero-val{font-size:26px;font-weight:600;line-height:1;}
+.mc-rows{display:flex;flex-direction:column;gap:9px;}
+.mc-rows>div{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;}
+.mc-rows>div span{color:var(--txt-3);}
+.mc-rows>div b{font-weight:600;color:var(--txt);}
+</style>
+{% endblock %}

@@ -15,7 +15,7 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label"><span class="dot" style="background:var(--accent)"></span> Общий объём</div>
         <div class="val num">{{ total_all|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">за {{ active_days }} активных дн.</div>
+        <div class="sub">{{ active_days }} дн. · ордеров: <b class="num">{{ total_orders }}</b></div>
     </div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label"><span class="dot" style="background:var(--green)"></span> Покупка</div>
@@ -102,24 +102,31 @@ function buildHeatmap(){
     updateLegend(rgb);
 }
 
-// Sparse data → labeled day tiles (avoids the near-empty year grid).
+function countFor(c){ return mode==='buy' ? c.n_buy : mode==='sell' ? c.n_sell : c.n; }
+
+// Sparse data → weekday-aligned tiles (Пн…Вс columns), with value + order count.
 function buildCompact(wrap, rgb, mx, start, end){
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;';
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(7,minmax(78px,1fr));gap:8px;max-width:660px;';
+    WD.forEach(w=>{ const h=document.createElement('div');
+        h.textContent=w;
+        h.style.cssText='font-size:10px;color:var(--txt-3);text-align:center;'; grid.appendChild(h); });
+    const lead = (start.getDay()+6)%7;             // Monday-based offset
+    for(let i=0;i<lead;i++) grid.appendChild(document.createElement('div'));
     const cur = new Date(start);
     while(cur <= end){
-        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0;
+        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0, n = c ? countFor(c) : 0;
         const cell = document.createElement('div');
-        cell.style.cssText = `width:56px;height:60px;border-radius:9px;display:flex;flex-direction:column;
-            align-items:center;justify-content:center;gap:3px;background:${shade(v,mx,rgb)};
-            border:1px solid var(--border-soft);`;
-        cell.innerHTML = `<span style="font-size:10px;color:var(--txt-3)">${WD[(cur.getDay()+6)%7]}, ${cur.getDate()}</span>
-            <span class="num" style="font-size:11px;color:var(--txt)">${v?fmt(v):'—'}</span>`;
-        cell.title = `${iso}: ${fmt(v)} ₽`;
-        row.appendChild(cell);
+        cell.style.cssText = `height:66px;border-radius:10px;padding:7px 9px;background:${shade(v,mx,rgb)};
+            border:1px solid var(--border-soft);display:flex;flex-direction:column;justify-content:space-between;`;
+        cell.innerHTML = `<span style="font-size:10px;color:var(--txt-3)">${cur.getDate()}</span>
+            <span class="num" style="font-size:13px;color:var(--txt);font-weight:600">${v?fmt(v):'—'}</span>
+            <span style="font-size:9px;color:var(--txt-3)">${n?n+' орд.':''}</span>`;
+        cell.title = `${iso}: ${fmt(v)} ₽ · ${n} орд.`;
+        grid.appendChild(cell);
         cur.setDate(cur.getDate()+1);
     }
-    wrap.appendChild(row);
+    wrap.appendChild(grid);
 }
 
 // Dense data → GitHub-style grid with weekday + month labels.
@@ -150,12 +157,12 @@ function buildGrid(wrap, rgb, mx, start, end){
             ml.style.cssText = `position:absolute;left:${week*19}px;font-size:9px;color:var(--txt-3);`;
             monthRow.appendChild(ml);
         }
-        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0;
+        const iso = isoOf(cur), c = byDate[iso], v = c ? c[mode] : 0, n = c ? countFor(c) : 0;
         const cell = document.createElement('div');
         cell.className = 'heat-cell';
         cell.style.background = shade(v, mx, rgb);
-        cell.title = `${iso}: ${fmt(v)} ₽`;
-        cell.onmouseenter = ()=>{ document.getElementById('hoverInfo').textContent = `${iso}: ${fmt(v)} ₽`; };
+        cell.title = `${iso}: ${fmt(v)} ₽ · ${n} орд.`;
+        cell.onmouseenter = ()=>{ document.getElementById('hoverInfo').textContent = `${iso}: ${fmt(v)} ₽ · ${n} орд.`; };
         grid.appendChild(cell);
         if((cur.getDay()+6)%7===6) week++;
         cur.setDate(cur.getDate()+1);

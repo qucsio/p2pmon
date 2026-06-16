@@ -31,7 +31,7 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Объём торгов</div>
         <div class="val num">{{ sum_volume|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">сумма оборота</div>
+        <div class="sub">ордеров: <b class="num">{{ order_count|intcomma }}</b></div>
     </div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Total Equity</div>
