@@ -40,3 +40,39 @@ class NormalizerTests(TestCase):
         self.assertIsNotNone(order.quantity_net)
         self.assertEqual(order.quantity_net, order.quantity_gross)
         self.assertEqual(P2POrder.objects.filter(exchange_account=self.account).count(), 1)
+
+    def test_normalize_sell_with_detail_payload(self):
+        raw = RawP2POrder.objects.create(
+            exchange_account=self.account,
+            bybit_order_id="2035665039475109888",
+            raw_list_payload={
+                "id": "2035665039475109888",
+                "side": 1,
+                "amount": "2500.00",
+                "price": "86.35",
+                "notifyTokenQuantity": "28.9519",
+                "createDate": "1774175341000",
+                "status": 50,
+                "tokenId": "USDT",
+                "currencyId": "RUB",
+                "fee": "0",
+                "buyerRealName": "АНДРЕЙ АЛЕКСАНДРОВИЧ ГУСЕВ",
+                "orderType": "ORIGIN",
+            },
+            raw_detail_payload={
+                "result": {
+                    "transferDate": "1774175535000",
+                    "side": 1,
+                    "quantity": "28.9519",
+                    "amount": "2500.00",
+                    "price": "86.35",
+                    "fee": "0",
+                }
+            },
+        )
+
+        order = normalize_raw_order(raw)
+
+        self.assertEqual(order.side, P2POrder.SIDE_SELL)
+        self.assertIsNotNone(order.quantity_net)
+        self.assertEqual(order.quantity_net, order.quantity_gross)

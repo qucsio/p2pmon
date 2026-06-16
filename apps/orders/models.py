@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -68,7 +70,7 @@ class P2POrder(TimestampedModel):
 
     price = models.DecimalField(**settings.DECIMAL_PRICE)
     quantity_gross = models.DecimalField(**settings.DECIMAL_USDT)
-    quantity_net = models.DecimalField(**settings.DECIMAL_USDT)
+    quantity_net = models.DecimalField(**settings.DECIMAL_USDT, default=Decimal("0"))
     amount_gross = models.DecimalField(**settings.DECIMAL_RUB, default=0)
     amount_net = models.DecimalField(**settings.DECIMAL_RUB, default=0)
     amount_rub = models.DecimalField(**settings.DECIMAL_RUB)

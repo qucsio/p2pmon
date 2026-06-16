@@ -114,11 +114,25 @@ def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
         "completed_at_moscow": completed_at_moscow,
     }
 
-    order, _ = P2POrder.objects.update_or_create(
+    order = P2POrder.objects.filter(
         exchange_account=raw.exchange_account,
         bybit_order_id=raw.bybit_order_id,
-        defaults={"raw_order": raw, **defaults},
-    )
+    ).first()
+    if order is None:
+        order = P2POrder(
+            exchange_account=raw.exchange_account,
+            bybit_order_id=raw.bybit_order_id,
+            raw_order=raw,
+        )
+
+    for field, value in defaults.items():
+        setattr(order, field, value)
+    order.raw_order = raw
+    if order.quantity_net is None:
+        order.quantity_net = quantity_gross
+    if order.amount_net is None:
+        order.amount_net = amount_gross
+    order.save()
     return order
 
 
