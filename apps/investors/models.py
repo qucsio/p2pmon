@@ -79,7 +79,17 @@ class Investor(TimestampedModel):
     # --- Capital (unit-based) ---
     @property
     def units(self) -> Decimal:
-        return self.capital_transactions.aggregate(t=Sum("units_delta"))["t"] or Decimal("0")
+        # Units come ONLY from real capital events (deposit/withdrawal/correction).
+        capital_types = [
+            InvestorCapitalTransaction.TYPE_DEPOSIT,
+            InvestorCapitalTransaction.TYPE_WITHDRAWAL,
+            InvestorCapitalTransaction.TYPE_CORRECTION,
+        ]
+        return (
+            self.capital_transactions.filter(type__in=capital_types)
+            .aggregate(t=Sum("units_delta"))["t"]
+            or Decimal("0")
+        )
 
     def earned_profit_total(self) -> Decimal:
         return self.allocations.aggregate(t=Sum("net_profit"))["t"] or Decimal("0")

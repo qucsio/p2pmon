@@ -5,7 +5,7 @@
 {% block topbar_extra %}
 <div class="topbar-actions">
     <a href="{% url 'investors:history' %}" class="btn-ghost">История взносов</a>
-    <a href="{% url 'investors:allocation' %}" class="btn-ghost">Распределение прибыли</a>
+    <a href="{% url 'investors:allocation' %}" class="btn-ghost">Отчёт по прибыли</a>
     <a href="{% url 'investors:create' %}" class="btn-accent">+ Добавить</a>
 </div>
 {% endblock %}
@@ -20,23 +20,23 @@
         <div class="val num">{{ total_units|floatformat:2|intcomma }}</div></div>
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Цена юнита</div>
-        <div class="val num">{{ unit_price|floatformat:4 }} ₽</div></div>
+        <div class="val num">{{ unit_price|floatformat:6 }} ₽</div></div>
 </div>
 
+<div class="section-label">Капитал и прибыль</div>
 <div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
     <thead><tr>
         <th>Имя</th>
         <th class="text-end">Капитал</th>
-        <th class="text-end">Доля капитала</th>
+        <th class="text-end">Доля</th>
         <th class="text-end">Юниты</th>
+        <th class="text-end">Внешний капитал</th>
+        <th class="text-end">Capital PnL</th>
         <th>Режим прибыли</th>
-        <th class="text-end">Тек. доля прибыли</th>
-        <th class="text-end">Заработано</th>
-        <th class="text-end">Выплачено</th>
-        <th class="text-end">Реинвест.</th>
-        <th class="text-end">Не выплачено</th>
+        <th class="text-end">Прибыль (по капиталу)</th>
+        <th class="text-end">Показано (net)</th>
         <th></th>
     </tr></thead>
     <tbody>
@@ -44,20 +44,17 @@
     <tr {% if not r.inv.is_active %}class="muted-row"{% endif %}>
         <td><a href="{% url 'investors:detail' r.inv.pk %}" style="color:var(--txt);font-weight:600;">{{ r.inv.name }}</a></td>
         <td class="num text-end">{{ r.capital_value|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.capital_share_pct|floatformat:2 }}%</td>
+        <td class="num text-end">{{ r.share|floatformat:2 }}%</td>
         <td class="num text-end">{{ r.units|floatformat:2 }}</td>
+        <td class="num text-end">{{ r.net_external|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.capital_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ r.capital_pnl|floatformat:0|intcomma }} ₽</td>
         <td><span class="pill gray">{{ r.profit_mode }}</span></td>
-        <td class="num text-end">{% if r.profit_share_pct != None %}{{ r.profit_share_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
-        <td class="num text-end {% if r.earned >= 0 %}pos{% else %}neg{% endif %}">{{ r.earned|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.paid|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end">{{ r.reinvested|floatformat:0|intcomma }} ₽</td>
-        <td class="num text-end {% if r.unpaid > 0 %}pos{% endif %}">{{ r.unpaid|floatformat:0|intcomma }} ₽</td>
-        <td class="text-end" style="white-space:nowrap;">
-            <a href="{% url 'investors:detail' r.inv.pk %}" class="btn-ghost btn-xs">Открыть</a>
-        </td>
+        <td class="num text-end {% if r.gross >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.displayed >= 0 %}pos{% else %}neg{% endif %}">{{ r.displayed|floatformat:0|intcomma }} ₽</td>
+        <td class="text-end"><a href="{% url 'investors:detail' r.inv.pk %}" class="btn-ghost btn-xs">Открыть</a></td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="11">Нет инвесторов</td></tr>
+    <tr class="empty-row"><td colspan="10">Нет инвесторов</td></tr>
     {% endfor %}
     </tbody>
 </table>

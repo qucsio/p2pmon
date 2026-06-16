@@ -1,44 +1,44 @@
 {% extends "base.html" %}
 {% load humanize %}
-{% block title %}Распределение прибыли{% endblock %}
-{% block heading %}Распределение прибыли{% endblock %}
+{% block title %}Отчёт по прибыли{% endblock %}
+{% block heading %}Отчёт по прибыли{% endblock %}
 {% block content %}
 
 <div class="panel" style="margin-bottom:18px;">
     <form method="get" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
-        <div class="form-field" style="margin:0;"><label class="form-label">С даты</label>{{ form.period_from }}</div>
-        <div class="form-field" style="margin:0;"><label class="form-label">По дату</label>{{ form.period_to }}</div>
-        <button class="btn-accent" type="submit">Рассчитать</button>
+        <div class="form-field" style="margin:0;"><label class="form-label">С даты (опц.)</label>{{ form.period_from }}</div>
+        <div class="form-field" style="margin:0;"><label class="form-label">По дату (опц.)</label>{{ form.period_to }}</div>
+        <button class="btn-accent" type="submit">Показать</button>
     </form>
+    <p style="color:var(--txt-3);font-size:12px;margin:10px 0 0;">Без дат — за всё время. Интервалы между капитальными событиями учитываются автоматически; прибыль распределяется по владению на каждый день и не меняет капитал/доли/юниты.</p>
 </div>
 
-{% if preview %}
-{% with qs=period_from|date:'Y-m-d' qe=period_to|date:'Y-m-d' %}
+{% if report.rows %}
 <div class="kpi-grid" style="margin-bottom:20px;">
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Распределяемая прибыль периода</div>
-        <div class="val num {% if preview.profit >= 0 %}pos{% else %}neg{% endif %}">{{ preview.profit|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">equity Δ за вычетом вводов/выводов</div></div>
-    <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Распределено инвесторам</div>
-        <div class="val num">{{ preview.allocated|floatformat:0|intcomma }} ₽</div></div>
+        <div class="label">Распределяемая прибыль</div>
+        <div class="val num {% if report.profit >= 0 %}pos{% else %}neg{% endif %}">{{ report.profit|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">{{ report.period_from|date:"d.m.Y" }} – {{ report.period_to|date:"d.m.Y" }}</div></div>
 </div>
 
-<div class="panel table-panel panel-pad-0" style="margin-bottom:14px;">
+<div class="panel table-panel panel-pad-0" style="margin-bottom:22px;">
 <div class="table-responsive">
 <table class="table">
     <thead><tr>
-        <th>Инвестор</th><th>Режим</th><th class="text-end">Доля капитала</th>
-        <th class="text-end">Доля прибыли</th><th class="text-end">Заработано</th>
+        <th>Инвестор</th><th>Режим</th>
+        <th class="text-end">Прибыль по капиталу</th><th class="text-end">Передано</th>
+        <th class="text-end">Получено</th><th class="text-end">Показано (net)</th><th>Источник</th>
     </tr></thead>
     <tbody>
-    {% for r in preview.rows %}
+    {% for r in report.rows %}
     <tr>
         <td>{{ r.investor.name }}</td>
         <td><span class="pill gray">{{ r.investor.get_profit_share_mode_display }}</span></td>
-        <td class="num text-end">{{ r.capital_share_pct|floatformat:2 }}%</td>
-        <td class="num text-end">{{ r.profit_share_pct|floatformat:2 }}%</td>
-        <td class="num text-end {% if r.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ r.net_profit|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.gross_by_capital >= 0 %}pos{% else %}neg{% endif %}">{{ r.gross_by_capital|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.transferred_out|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end">{{ r.received|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ r.displayed_net|floatformat:0|intcomma }} ₽</td>
+        <td>{% if r.source_investor %}{{ r.source_investor.name }}{% else %}—{% endif %}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -46,91 +46,58 @@
 </div>
 </div>
 
-<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:10px;">
-    <form method="post" action="?period_from={{ qs }}&period_to={{ qe }}">{% csrf_token %}
-        <input type="hidden" name="action" value="save"><button class="btn-accent" type="submit">Сохранить / заморозить</button>
-    </form>
-    <form method="post" action="?period_from={{ qs }}&period_to={{ qe }}" onsubmit="return confirm('Отметить весь период как ВЫПЛАЧЕНО?');">{% csrf_token %}
-        <input type="hidden" name="action" value="settle_paid"><button class="btn-ghost ok" type="submit">Выплатить период</button>
-    </form>
-    <form method="post" action="?period_from={{ qs }}&period_to={{ qe }}" onsubmit="return confirm('Реинвестировать весь период (по единой цене юнита)?');">{% csrf_token %}
-        <input type="hidden" name="action" value="settle_reinvest"><button class="btn-ghost" type="submit">Реинвестировать период</button>
-    </form>
-</div>
-<p style="color:var(--txt-3);font-size:12px;margin-bottom:6px;">Сначала «Сохранить / заморозить», затем при необходимости пакетная выплата/реинвест. Реинвест всего периода использует единую цену юнита.</p>
-
-<div class="row g-3" style="margin:14px 0;">
+<div class="row g-3" style="margin-bottom:22px;">
     <div class="col-xl-6"><div class="panel">
-        <div class="panel-head"><div><p class="panel-sub">Период</p><h3 class="panel-title">Заработано по инвесторам</h3></div></div>
+        <div class="panel-head"><div><p class="panel-sub">Период</p><h3 class="panel-title">Показанная прибыль по инвесторам</h3></div></div>
         <div class="chart-box" style="height:240px;"><canvas id="earnedChart"></canvas></div>
     </div></div>
     <div class="col-xl-6"><div class="panel">
-        <div class="panel-head"><div><p class="panel-sub">История</p><h3 class="panel-title">Накопленная прибыль по инвесторам</h3></div></div>
+        <div class="panel-head"><div><p class="panel-sub">Динамика</p><h3 class="panel-title">Накопленная прибыль по инвесторам</h3></div></div>
         <div class="chart-box" style="height:240px;"><canvas id="cumChart"></canvas></div>
     </div></div>
 </div>
-{% endwith %}
 {% endif %}
 
-<div class="section-label" style="margin-top:26px;">Сохранённые аллокации</div>
+<div class="section-label">Непривязанные внешние движения</div>
 <div class="panel table-panel panel-pad-0">
 <div class="table-responsive">
 <table class="table">
-    <thead><tr>
-        <th>Период</th><th>Инвестор</th><th class="text-end">Доля прибыли</th><th class="text-end">Сумма</th><th>Статус</th><th class="text-end">Действия</th>
-    </tr></thead>
+    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма ₽</th><th class="text-end">USDT</th><th>Комментарий</th></tr></thead>
     <tbody>
-    {% for a in saved %}
+    {% for a in flows %}
     <tr>
-        <td class="num" style="white-space:nowrap;">{{ a.period_from|date:"d.m.Y" }} – {{ a.period_to|date:"d.m.Y" }}</td>
-        <td>{{ a.investor.name }}</td>
-        <td class="num text-end">{{ a.profit_share_pct|floatformat:2 }}%</td>
-        <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:0|intcomma }} ₽</td>
-        <td>{% include "investors/_status_pill.html" with status=a.status %}</td>
-        <td class="text-end" style="white-space:nowrap;">
-            {% if a.status == 'unpaid_claim' %}
-            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
-                <input type="hidden" name="status" value="paid_out"><button class="btn-ghost btn-xs ok">Выплатить</button>
-            </form>
-            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
-                <input type="hidden" name="status" value="reinvested"><button class="btn-ghost btn-xs">Реинвест</button>
-            </form>
-            {% elif a.status == 'retained_in_capital' %}<span style="color:var(--txt-3);">в NAV</span>
-            {% else %}<span style="color:var(--txt-3);">заморожено</span>{% endif %}
-        </td>
+        <td class="num">{{ a.effective_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ a.get_type_display }}</td>
+        <td class="num text-end {% if a.signed_amount_rub < 0 %}neg{% endif %}">{{ a.signed_amount_rub|floatformat:0|intcomma }}</td>
+        <td class="num text-end">{{ a.signed_amount_usdt|floatformat:2 }}</td>
+        <td style="color:var(--txt-2);">{{ a.comment|truncatechars:48 }}</td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="6">Пока нет сохранённых аллокаций</td></tr>
+    <tr class="empty-row"><td colspan="5">Нет непривязанных движений</td></tr>
     {% endfor %}
     </tbody>
 </table>
 </div>
 </div>
+<p style="color:var(--txt-3);font-size:12px;margin-top:8px;">Это внешние движения капитала/расходы в леджере, не привязанные к инвестору (напр. необъяснённое падение equity). Их следует проверить — они не считаются торговой прибылью.</p>
 {% endblock %}
 
 {% block extra_js %}
-{% if preview %}
+{% if report.rows %}
 <script>
 const PALETTE = ['#ff7a18','#3b9eff','#2ec27e','#a78bfa','#f5b948','#f0506e','#22d3ee'];
-const earnedEl = document.getElementById('earnedChart');
-const earnedData = {{ earned_data|safe }};
-if (earnedEl && earnedData.length) {
-    new Chart(earnedEl, { type:'bar',
-        data:{ labels:{{ earned_labels|safe }}, datasets:[{ data:earnedData,
-            backgroundColor:earnedData.map((_,i)=>PALETTE[i%PALETTE.length]+'cc'), borderRadius:4 }]},
-        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
-            tooltip:{callbacks:{label:c=>` ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽`}}},
-            scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(255,255,255,.045)'},ticks:{callback:v=>v.toLocaleString('ru-RU')}}}}
-    });
-}
-const cumEl = document.getElementById('cumChart');
-const cumDatasets = {{ cum_datasets|safe }};
-if (cumEl && cumDatasets.length) {
-    cumDatasets.forEach((d,i)=>{ d.borderColor=PALETTE[i%PALETTE.length]; d.borderWidth=2; d.tension=.3; d.pointRadius=0; d.fill=false; });
-    new Chart(cumEl, { type:'line',
-        data:{ labels:{{ cum_labels|safe }}, datasets:cumDatasets },
-        options:{ responsive:true, maintainAspectRatio:false,
-            interaction:{mode:'index',intersect:false},
+const eEl = document.getElementById('earnedChart'); const eData = {{ earned_data|safe }};
+if (eEl && eData.length) new Chart(eEl, { type:'bar',
+    data:{ labels:{{ earned_labels|safe }}, datasets:[{ data:eData, borderRadius:4,
+        backgroundColor:eData.map((_,i)=>PALETTE[i%PALETTE.length]+'cc') }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>` ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽`}}},
+        scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(255,255,255,.045)'},ticks:{callback:v=>v.toLocaleString('ru-RU')}}}}
+});
+const cEl = document.getElementById('cumChart'); const cds = {{ cum_datasets|safe }};
+if (cEl && cds.length) { cds.forEach((d,i)=>{d.borderColor=PALETTE[i%PALETTE.length];d.borderWidth=2;d.tension=.3;d.pointRadius=0;d.fill=false;});
+    new Chart(cEl, { type:'line', data:{ labels:{{ cum_labels|safe }}, datasets:cds },
+        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
             plugins:{legend:{labels:{boxWidth:10,usePointStyle:true}},
                 tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽`}}},
             scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8}},y:{grid:{color:'rgba(255,255,255,.045)'},ticks:{callback:v=>v.toLocaleString('ru-RU')}}}}

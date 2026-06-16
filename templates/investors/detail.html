@@ -11,23 +11,37 @@
 {% endblock %}
 {% block content %}
 
-<div class="kpi-grid" style="margin-bottom:22px;">
+<div class="section-label">Капитал (владение)</div>
+<div class="kpi-grid" style="margin-bottom:20px;">
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Капитал</div>
-        <div class="val num">{{ capital_value|floatformat:0|intcomma }} ₽</div>
-        <div class="sub">доля: <b class="num">{{ capital_share_pct|floatformat:2 }}%</b> · юнитов: <b class="num">{{ units|floatformat:2 }}</b></div></div>
+        <div class="val num">{{ cap.capital_value|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">доля: <b class="num">{{ cap.share_pct|default:0|floatformat:2 }}%</b> · юнитов: <b class="num">{{ cap.units|default:0|floatformat:2 }}</b></div></div>
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Заработано прибыли</div>
-        <div class="val num {% if earned >= 0 %}pos{% else %}neg{% endif %}">{{ earned|floatformat:0|intcomma }} ₽</div></div>
+        <div class="label">Внешний капитал (нетто)</div>
+        <div class="val num">{{ cap.net_external_capital|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">депозиты − выводы ± корректировки</div></div>
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Выплачено</div>
-        <div class="val num">{{ paid|floatformat:0|intcomma }} ₽</div></div>
+        <div class="label">Capital PnL</div>
+        <div class="val num {% if cap.capital_pnl >= 0 %}pos{% else %}neg{% endif %}">{{ cap.capital_pnl|default:0|floatformat:0|intcomma }} ₽</div>
+        <div class="sub">капитал − внешний капитал</div></div>
+</div>
+
+<div class="section-label">Прибыль (только отображение)</div>
+<div class="kpi-grid" style="margin-bottom:22px;">
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Реинвестировано</div>
-        <div class="val num">{{ reinvested|floatformat:0|intcomma }} ₽</div></div>
+        <div class="label">Прибыль по капиталу</div>
+        <div class="val num {% if rep.gross_by_capital >= 0 %}pos{% else %}neg{% endif %}">{{ rep.gross_by_capital|default:0|floatformat:0|intcomma }} ₽</div></div>
     <div class="kpi"><span class="accent-bar"></span>
-        <div class="label">Не выплачено (claim)</div>
-        <div class="val num {% if unpaid > 0 %}pos{% endif %}">{{ unpaid|floatformat:0|intcomma }} ₽</div></div>
+        <div class="label">Передано другому</div>
+        <div class="val num">{{ rep.transferred_out|default:0|floatformat:0|intcomma }} ₽</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Получено по соглашению</div>
+        <div class="val num">{{ rep.received|default:0|floatformat:0|intcomma }} ₽</div>
+        {% if rep.source_investor %}<div class="sub">источник: {{ rep.source_investor.name }}</div>{% endif %}</div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Показанная прибыль (net)</div>
+        <div class="val num {% if rep.displayed_net >= 0 %}pos{% else %}neg{% endif %}">{{ rep.displayed_net|default:0|floatformat:0|intcomma }} ₽</div></div>
 </div>
 
 <div class="row g-3" style="margin-bottom:22px;">
@@ -36,43 +50,9 @@
         <div class="chart-box" style="height:230px;"><canvas id="capChart"></canvas></div>
     </div></div>
     <div class="col-xl-6"><div class="panel">
-        <div class="panel-head"><div><p class="panel-sub">Прибыль</p><h3 class="panel-title">Накопленная прибыль</h3></div></div>
+        <div class="panel-head"><div><p class="panel-sub">Прибыль</p><h3 class="panel-title">Накопленная показанная прибыль</h3></div></div>
         <div class="chart-box" style="height:230px;"><canvas id="earnChart"></canvas></div>
     </div></div>
-</div>
-
-<div class="section-label">Выплаты и реинвестиции</div>
-<div class="panel table-panel panel-pad-0" style="margin-bottom:22px;">
-<div class="table-responsive">
-<table class="table">
-    <thead><tr><th>Период</th><th class="text-end">Доля прибыли</th><th class="text-end">Сумма</th><th>Статус</th><th class="text-end">Действия</th></tr></thead>
-    <tbody>
-    {% for a in allocations %}
-    <tr>
-        <td class="num">{{ a.period_from|date:"d.m.Y" }} – {{ a.period_to|date:"d.m.Y" }}</td>
-        <td class="num text-end">{{ a.profit_share_pct|floatformat:2 }}%</td>
-        <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:0|intcomma }} ₽</td>
-        <td>{% include "investors/_status_pill.html" with status=a.status %}</td>
-        <td class="text-end" style="white-space:nowrap;">
-            {% if a.status == 'unpaid_claim' %}
-            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
-                <input type="hidden" name="status" value="paid_out">
-                <button class="btn-ghost btn-xs ok">Выплатить</button>
-            </form>
-            <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
-                <input type="hidden" name="status" value="reinvested">
-                <button class="btn-ghost btn-xs">Реинвест</button>
-            </form>
-            {% elif a.status == 'retained_in_capital' %}<span style="color:var(--txt-3);">в NAV</span>
-            {% else %}<span style="color:var(--txt-3);">заморожено</span>{% endif %}
-        </td>
-    </tr>
-    {% empty %}
-    <tr class="empty-row"><td colspan="5">Нет аллокаций</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
-</div>
 </div>
 
 <div class="section-label">Движения капитала</div>
@@ -87,11 +67,11 @@
         <td><span class="pill gray">{{ t.get_type_display }}</span></td>
         <td class="num text-end">{{ t.amount_rub|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end {% if t.units_delta >= 0 %}pos{% else %}neg{% endif %}">{{ t.units_delta|floatformat:2 }}</td>
-        <td class="num text-end">{{ t.unit_price|floatformat:4 }}</td>
+        <td class="num text-end">{{ t.unit_price|floatformat:6 }}</td>
         <td style="color:var(--txt-2);">{{ t.comment|truncatechars:48 }}</td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="6">Нет движений</td></tr>
+    <tr class="empty-row"><td colspan="6">Нет движений капитала</td></tr>
     {% endfor %}
     </tbody>
 </table>
@@ -101,22 +81,21 @@
 
 {% block extra_js %}
 <script>
-function lineChart(id, labels, data, hex, label){
+function lineChart(id, labels, data, hex){
     const el = document.getElementById(id); if(!el || !labels.length) return;
     const n = parseInt(hex.slice(1),16), rgb = `rgb(${n>>16&255},${n>>8&255},${n&255})`;
     const g = el.getContext('2d').createLinearGradient(0,0,0,230);
     g.addColorStop(0, rgb.replace('rgb','rgba').replace(')',',.28)'));
     g.addColorStop(1, rgb.replace('rgb','rgba').replace(')',',0)'));
     new Chart(el, { type:'line',
-        data:{ labels, datasets:[{ label, data, borderColor:rgb, borderWidth:2, backgroundColor:g, fill:true, tension:.3, pointRadius:0, pointHoverRadius:5 }]},
-        options:{ responsive:true, maintainAspectRatio:false,
-            interaction:{mode:'index',intersect:false},
+        data:{ labels, datasets:[{ data, borderColor:rgb, borderWidth:2, backgroundColor:g, fill:true, tension:.3, pointRadius:0, pointHoverRadius:5 }]},
+        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
             plugins:{ legend:{display:false}, tooltip:{ backgroundColor:'#13161d', borderColor:'#222733', borderWidth:1, cornerRadius:9, displayColors:false,
                 callbacks:{ label:c=>` ${Math.round(c.parsed.y).toLocaleString('ru-RU')} ₽` } } },
             scales:{ x:{grid:{display:false},ticks:{maxTicksLimit:8,maxRotation:0}}, y:{grid:{color:'rgba(255,255,255,.045)'},ticks:{callback:v=>v.toLocaleString('ru-RU')}} } }
     });
 }
-lineChart('capChart', {{ cap_labels|safe }}, {{ cap_values|safe }}, '#3b9eff', 'Капитал');
-lineChart('earnChart', {{ earn_labels|safe }}, {{ earn_values|safe }}, '#2ec27e', 'Прибыль');
+lineChart('capChart', {{ cap_labels|safe }}, {{ cap_values|safe }}, '#3b9eff');
+lineChart('earnChart', {{ earn_labels|safe }}, {{ earn_values|safe }}, '#2ec27e');
 </script>
 {% endblock %}

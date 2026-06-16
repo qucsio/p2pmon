@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.common.helpers import get_active_account
 from apps.investors import services
-from apps.investors.models import Investor, InvestorCapitalTransaction, ProfitAllocation
+from apps.investors.models import Investor, InvestorCapitalTransaction
 from apps.ledger.models import LedgerAdjustment
 from apps.ledger.tasks import rebuild_ledger
 
@@ -29,14 +29,12 @@ class InvestorForm(forms.ModelForm):
             "is_active", "comment",
         )
         labels = {
-            "name": "Имя",
-            "profit_share_mode": "Режим доли прибыли",
+            "name": "Имя", "profit_share_mode": "Режим доли прибыли",
             "profit_share_multiplier": "Множитель прибыли",
             "profit_share_fixed_pct": "Фикс. % прибыли",
             "source_investor": "Источник (для «доли от прибыли»)",
             "split_percent": "% от прибыли источника",
-            "is_active": "Активен",
-            "comment": "Комментарий",
+            "is_active": "Активен", "comment": "Комментарий",
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -52,47 +50,42 @@ class CapitalTxnForm(forms.Form):
     amount_rub = forms.DecimalField(min_value=Decimal("0.01"), label="Сумма, ₽")
     effective_at = forms.DateTimeField(
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
-        input_formats=["%Y-%m-%dT%H:%M"],
-        label="Дата/время",
+        input_formats=["%Y-%m-%dT%H:%M"], label="Дата/время",
     )
     comment = forms.CharField(required=False, widget=forms.Textarea, label="Комментарий")
 
 
-class AllocationPeriodForm(forms.Form):
-    period_from = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}), label="С даты")
-    period_to = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}), label="По дату")
+class ReportPeriodForm(forms.Form):
+    period_from = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"}), label="С даты")
+    period_to = forms.DateField(
+        required=False, widget=forms.DateInput(attrs={"type": "date"}), label="По дату")
 
 
 @login_required
 def investor_list(request):
     account = get_active_account(request.user)
-    unit_price = services.current_unit_price(request.user, account)
-    total_units = services.total_units(request.user)
-    equity = services.portfolio_equity(account)
+    cap = services.capital_summary(request.user, account)
+    report = services.profit_report(request.user, account)
+    rep = {r["investor"].id: r for r in report.get("rows", [])}
 
-    investors = Investor.objects.filter(user=request.user).order_by("name")
     rows = []
-    for inv in investors:
-        units = inv.units
-        last_alloc = inv.allocations.order_by("-period_to").first()
+    for cr in cap["rows"]:
+        inv = cr["investor"]
+        pr = rep.get(inv.id, {})
         rows.append({
             "inv": inv,
-            "units": units,
-            "capital_value": units * unit_price,
-            "capital_share_pct": (units / total_units * 100) if total_units > 0 else Decimal("0"),
+            "units": cr["units"], "share": cr["share_pct"],
+            "capital_value": cr["capital_value"],
+            "net_external": cr["net_external_capital"],
+            "capital_pnl": cr["capital_pnl"],
             "profit_mode": inv.get_profit_share_mode_display(),
-            "profit_share_pct": last_alloc.profit_share_pct if last_alloc else None,
-            "earned": inv.earned_profit_total(),
-            "paid": inv.settled_total(ProfitAllocation.STATUS_PAID_OUT),
-            "reinvested": inv.settled_total(ProfitAllocation.STATUS_REINVESTED),
-            "unpaid": inv.unpaid_total(),
+            "gross": pr.get("gross_by_capital", Decimal("0")),
+            "displayed": pr.get("displayed_net", Decimal("0")),
         })
-
     return render(request, "investors/list.html", {
-        "rows": rows,
-        "equity": equity,
-        "unit_price": unit_price,
-        "total_units": total_units,
+        "rows": rows, "equity": cap["equity"],
+        "unit_price": cap["unit_price"], "total_units": cap["total_units"],
     })
 
 
@@ -123,9 +116,16 @@ def investor_edit(request, pk):
 def investor_detail(request, pk):
     investor = get_object_or_404(Investor, pk=pk, user=request.user)
     account = get_active_account(request.user)
-    unit_price = services.current_unit_price(request.user, account)
 
-    txns = list(investor.capital_transactions.order_by("effective_at", "id"))
+    cap = services.capital_summary(request.user, account)
+    cap_row = next((r for r in cap["rows"] if r["investor"].id == investor.id), None)
+    report = services.profit_report(request.user, account)
+    rep_row = next((r for r in report.get("rows", []) if r["investor"].id == investor.id), {})
+
+    txns = list(
+        investor.capital_transactions.filter(type__in=services.CAPITAL_EVENT_TYPES)
+        .order_by("effective_at", "id")
+    )
     cap_labels, cap_values = [], []
     cum_units = Decimal("0")
     for t in txns:
@@ -133,31 +133,18 @@ def investor_detail(request, pk):
         cap_labels.append(t.effective_at.strftime("%d.%m.%Y"))
         cap_values.append(float(cum_units * t.unit_price))
 
-    allocs = list(investor.allocations.order_by("period_to"))
-    earn_labels, earn_values = [], []
-    cum = Decimal("0")
-    for a in allocs:
-        cum += a.net_profit
-        earn_labels.append(a.period_to.strftime("%d.%m.%Y"))
-        earn_values.append(float(cum))
+    earn_series = report.get("series", {}).get(investor.id, [])
+    earn_labels = report.get("series_labels", [])
 
-    units = investor.units
     return render(request, "investors/detail.html", {
         "investor": investor,
-        "units": units,
-        "unit_price": unit_price,
-        "capital_value": units * unit_price,
-        "capital_share_pct": services.capital_share_pct(investor, request.user),
+        "cap": cap_row or {},
+        "rep": rep_row or {},
         "txns": list(reversed(txns)),
-        "allocations": investor.allocations.order_by("-period_to"),
-        "earned": investor.earned_profit_total(),
-        "paid": investor.settled_total(ProfitAllocation.STATUS_PAID_OUT),
-        "reinvested": investor.settled_total(ProfitAllocation.STATUS_REINVESTED),
-        "unpaid": investor.unpaid_total(),
         "cap_labels": json.dumps(cap_labels),
         "cap_values": json.dumps(cap_values),
         "earn_labels": json.dumps(earn_labels),
-        "earn_values": json.dumps(earn_values),
+        "earn_values": json.dumps(earn_series),
     })
 
 
@@ -181,37 +168,28 @@ def _capital_txn(request, pk, is_deposit):
     if request.method == "POST" and form.is_valid():
         try:
             fn = services.deposit if is_deposit else services.withdraw
-            fn(
-                investor,
-                form.cleaned_data["amount_rub"],
-                form.cleaned_data["effective_at"],
-                account, request.user,
-                comment=form.cleaned_data["comment"],
-            )
+            fn(investor, form.cleaned_data["amount_rub"], form.cleaned_data["effective_at"],
+               account, request.user, comment=form.cleaned_data["comment"])
             _rebuild(account)
             messages.success(request, f"{'Депозит' if is_deposit else 'Вывод'} проведён. Леджер пересчитывается.")
             return redirect("investors:detail", pk=pk)
         except ValidationError as e:
             form.add_error(None, e)
-
     return render(request, "investors/form.html", {"form": form, "title": title})
 
 
 @login_required
 def contribution_history(request):
     """Link existing ledger adjustments (money already in the portfolio) to
-    investors as dated capital contributions — without creating new cash."""
+    investors as dated capital contributions — no new cash is created."""
     account = get_active_account(request.user)
     investors = list(Investor.objects.filter(user=request.user).order_by("name"))
 
     if request.method == "POST" and account:
         adj = get_object_or_404(
             LedgerAdjustment, pk=request.POST.get("adjustment_id"),
-            exchange_account=account, is_deleted=False,
-        )
-        investor = get_object_or_404(
-            Investor, pk=request.POST.get("investor_id"), user=request.user
-        )
+            exchange_account=account, is_deleted=False)
+        investor = get_object_or_404(Investor, pk=request.POST.get("investor_id"), user=request.user)
         try:
             services.link_contribution(investor, adj, request.user, account)
             messages.success(request, f"Привязано к {investor.name}.")
@@ -223,106 +201,44 @@ def contribution_history(request):
     if account:
         for adj in (
             account.adjustments.filter(is_deleted=False, account=LedgerAdjustment.ACCOUNT_BANK)
-            .prefetch_related("investor_transactions__investor")
-            .order_by("effective_at")
+            .prefetch_related("investor_transactions__investor").order_by("effective_at")
         ):
-            itx = adj.investor_transactions.all()
             if adj.signed_amount_rub() == 0:
                 continue
-            (linked if itx else unlinked).append(adj)
+            if adj.type not in services.LINKABLE_ADJUSTMENT_TYPES:
+                continue
+            (linked if adj.investor_transactions.all() else unlinked).append(adj)
 
     return render(request, "investors/history.html", {
-        "account": account,
-        "investors": investors,
-        "unlinked": unlinked,
-        "linked": linked,
+        "account": account, "investors": investors,
+        "unlinked": unlinked, "linked": linked,
     })
 
 
 @login_required
-def calculate_allocation(request):
+def profit_report_view(request):
+    """Reporting-only profit by capital ownership over automatic intervals."""
     account = get_active_account(request.user)
-    form = AllocationPeriodForm(request.GET or None)
-    preview = None
-    period_from = period_to = None
+    form = ReportPeriodForm(request.GET or None)
+    pf = pt = None
+    if form.is_valid():
+        pf = form.cleaned_data.get("period_from")
+        pt = form.cleaned_data.get("period_to")
 
-    if account and form.is_valid():
-        period_from = form.cleaned_data["period_from"]
-        period_to = form.cleaned_data["period_to"]
-        action = request.POST.get("action") if request.method == "POST" else None
-        try:
-            if action == "save":
-                preview = services.compute_allocation(request.user, period_from, period_to, account)
-                services.save_allocation(request.user, period_from, period_to, preview)
-                messages.success(request, "Аллокация сохранена и заморожена.")
-                return redirect(f"{request.path}?period_from={period_from}&period_to={period_to}")
-            if action in ("settle_paid", "settle_reinvest"):
-                status = (ProfitAllocation.STATUS_PAID_OUT if action == "settle_paid"
-                          else ProfitAllocation.STATUS_REINVESTED)
-                n = services.settle_period(request.user, account, period_from, period_to, status)
-                if status == ProfitAllocation.STATUS_PAID_OUT:
-                    _rebuild(account)
-                messages.success(request, f"Отмечено строк: {n}.")
-                return redirect(f"{request.path}?period_from={period_from}&period_to={period_to}")
-            preview = services.compute_allocation(request.user, period_from, period_to, account)
-        except ValidationError as e:
-            messages.error(request, "; ".join(e.messages))
+    report = services.profit_report(request.user, account, pf, pt) if account else {"rows": []}
+    flows = services.unassigned_external_flows(account) if account else []
 
-    saved = (
-        ProfitAllocation.objects.filter(investor__user=request.user)
-        .select_related("investor")
-        .order_by("-period_to", "-created_at", "investor__name")[:60]
-    )
-
-    # Charts: earned by investor (preview period) + cumulative earned by investor.
-    earned_labels, earned_data = [], []
-    if preview:
-        for r in preview["rows"]:
-            if r["net_profit"]:
-                earned_labels.append(r["investor"].name)
-                earned_data.append(float(r["net_profit"]))
-
-    from collections import defaultdict
-    hist = (
-        ProfitAllocation.objects.filter(investor__user=request.user)
-        .select_related("investor").order_by("period_to")
-    )
-    periods = sorted({a.period_to for a in hist})
-    plabels = [p.strftime("%d.%m.%Y") for p in periods]
-    per = defaultdict(lambda: {p: 0.0 for p in periods})
-    for a in hist:
-        per[a.investor.name][a.period_to] += float(a.net_profit)
-    cum_datasets = []
-    for name, pmap in per.items():
-        running, series = 0.0, []
-        for p in periods:
-            running += pmap[p]
-            series.append(round(running, 2))
-        cum_datasets.append({"label": name, "data": series})
+    earned_labels = [r["investor"].name for r in report.get("rows", []) if r["displayed_net"]]
+    earned_data = [float(r["displayed_net"]) for r in report.get("rows", []) if r["displayed_net"]]
+    cum_datasets = [
+        {"label": r["investor"].name, "data": report["series"].get(r["investor"].id, [])}
+        for r in report.get("rows", [])
+    ]
 
     return render(request, "investors/allocation.html", {
-        "form": form, "preview": preview, "account": account,
-        "period_from": period_from, "period_to": period_to, "saved": saved,
+        "form": form, "report": report, "account": account, "flows": flows,
         "earned_labels": json.dumps(earned_labels),
         "earned_data": json.dumps(earned_data),
-        "cum_labels": json.dumps(plabels),
+        "cum_labels": json.dumps(report.get("series_labels", [])),
         "cum_datasets": json.dumps(cum_datasets),
     })
-
-
-@login_required
-def allocation_settle(request, pk):
-    allocation = get_object_or_404(ProfitAllocation, pk=pk, investor__user=request.user)
-    account = get_active_account(request.user)
-    status = request.POST.get("status")
-    if status not in (ProfitAllocation.STATUS_PAID_OUT, ProfitAllocation.STATUS_REINVESTED):
-        messages.error(request, "Неверный статус.")
-    else:
-        try:
-            services.settle_allocation(allocation, status, account, request.user)
-            if status == ProfitAllocation.STATUS_PAID_OUT:
-                _rebuild(account)  # payout posts a ledger withdrawal
-            messages.success(request, "Статус обновлён.")
-        except ValidationError as e:
-            messages.error(request, "; ".join(e.messages))
-    return redirect(request.META.get("HTTP_REFERER", "investors:list"))
