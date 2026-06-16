@@ -11,6 +11,27 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 COMPLETED_STATUS = 50
 
 
+def _compute_net_fields(
+    side: str,
+    quantity_gross: Decimal,
+    amount_gross: Decimal,
+    fee_amount: Decimal,
+    fee_currency: str,
+) -> tuple[Decimal, Decimal, Decimal]:
+    currency = (fee_currency or "").upper()
+    if currency == "USDT" and fee_amount > 0:
+        if side == P2POrder.SIDE_BUY:
+            return q_usdt(quantity_gross - fee_amount), amount_gross, amount_gross
+        return quantity_gross, amount_gross, amount_gross
+    if currency == "RUB" and fee_amount > 0:
+        if side == P2POrder.SIDE_SELL:
+            amount_net = q_rub(amount_gross - fee_amount)
+            return quantity_gross, amount_net, amount_net
+        amount_net = q_rub(amount_gross + fee_amount)
+        return quantity_gross, amount_net, amount_net
+    return quantity_gross, amount_gross, amount_gross
+
+
 def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
     list_payload = raw.raw_list_payload
     detail_payload = raw.raw_detail_payload or {}
@@ -48,6 +69,23 @@ def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
     else:
         counterparty_name = list_payload.get("buyerRealName") or detail.get("buyerRealName") or ""
 
+    existing = P2POrder.objects.filter(
+        exchange_account=raw.exchange_account,
+        bybit_order_id=raw.bybit_order_id,
+    ).first()
+    fee_stub = existing or P2POrder(
+        exchange_account=raw.exchange_account,
+        bybit_order_id=raw.bybit_order_id,
+        side=side,
+        quantity_gross=quantity_gross,
+        amount_rub=amount_gross,
+        created_at_moscow=created_at_moscow,
+    )
+    fee_amount, fee_currency, fee_source = resolve_fee(fee_stub, list_payload, detail_payload)
+    quantity_net, amount_net, amount_rub = _compute_net_fields(
+        side, quantity_gross, amount_gross, fee_amount, fee_currency
+    )
+
     defaults = {
         "bybit_side": bybit_side,
         "side": side,
@@ -57,8 +95,13 @@ def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
         "currency_id": list_payload.get("currencyId") or detail.get("currencyId") or "RUB",
         "price": price,
         "quantity_gross": quantity_gross,
+        "quantity_net": quantity_net,
         "amount_gross": amount_gross,
-        "amount_rub": amount_gross,
+        "amount_net": amount_net,
+        "amount_rub": amount_rub,
+        "fee_amount": fee_amount,
+        "fee_currency": fee_currency,
+        "fee_source": fee_source,
         "maker_fee": q_usdt(d(detail.get("makerFee") or 0)),
         "taker_fee": q_usdt(d(detail.get("takerFee") or 0)),
         "counterparty_name": counterparty_name or "",
@@ -76,32 +119,6 @@ def normalize_raw_order(raw: RawP2POrder) -> P2POrder:
         bybit_order_id=raw.bybit_order_id,
         defaults={"raw_order": raw, **defaults},
     )
-
-    fee_amount, fee_currency, fee_source = resolve_fee(order, list_payload, detail_payload)
-    order.fee_amount = fee_amount
-    order.fee_currency = fee_currency
-    order.fee_source = fee_source
-
-    if fee_currency.upper() == "USDT" and fee_amount > 0:
-        if side == P2POrder.SIDE_BUY:
-            order.quantity_net = q_usdt(quantity_gross - fee_amount)
-            order.amount_net = amount_gross
-        else:
-            order.quantity_net = quantity_gross
-            order.amount_net = amount_gross
-    elif fee_currency.upper() == "RUB" and fee_amount > 0:
-        order.quantity_net = quantity_gross
-        if side == P2POrder.SIDE_SELL:
-            order.amount_net = q_rub(amount_gross - fee_amount)
-            order.amount_rub = order.amount_net
-        else:
-            order.amount_net = q_rub(amount_gross + fee_amount)
-            order.amount_rub = order.amount_net
-    else:
-        order.quantity_net = quantity_gross
-        order.amount_net = amount_gross
-
-    order.save()
     return order
 
 
