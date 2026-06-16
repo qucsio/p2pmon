@@ -3,9 +3,15 @@ from django.contrib import admin
 from apps.investors.models import (
     Investor,
     InvestorCapitalTransaction,
+    InvestorPositionSnapshot,
     ProfitAllocation,
     TaxSetting,
 )
+
+
+@admin.register(InvestorPositionSnapshot)
+class InvestorPositionSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("investor", "period_from", "period_to", "closing_units", "capital_share_pct", "earned_profit_rub")
 
 
 @admin.register(Investor)

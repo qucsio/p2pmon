@@ -25,16 +25,27 @@ class InvestorForm(forms.ModelForm):
         model = Investor
         fields = (
             "name", "profit_share_mode", "profit_share_multiplier",
-            "profit_share_fixed_pct", "is_active", "comment",
+            "profit_share_fixed_pct", "source_investor", "split_percent",
+            "is_active", "comment",
         )
         labels = {
             "name": "Имя",
             "profit_share_mode": "Режим доли прибыли",
             "profit_share_multiplier": "Множитель прибыли",
             "profit_share_fixed_pct": "Фикс. % прибыли",
+            "source_investor": "Источник (для «доли от прибыли»)",
+            "split_percent": "% от прибыли источника",
             "is_active": "Активен",
             "comment": "Комментарий",
         }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        qs = Investor.objects.filter(user=user) if user else Investor.objects.none()
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        self.fields["source_investor"].queryset = qs
+        self.fields["source_investor"].required = False
 
 
 class CapitalTxnForm(forms.Form):
@@ -74,6 +85,7 @@ def investor_list(request):
             "earned": inv.earned_profit_total(),
             "paid": inv.settled_total(ProfitAllocation.STATUS_PAID_OUT),
             "reinvested": inv.settled_total(ProfitAllocation.STATUS_REINVESTED),
+            "unpaid": inv.unpaid_total(),
         })
 
     return render(request, "investors/list.html", {
@@ -86,7 +98,7 @@ def investor_list(request):
 
 @login_required
 def investor_create(request):
-    form = InvestorForm(request.POST or None)
+    form = InvestorForm(request.POST or None, user=request.user)
     if request.method == "POST" and form.is_valid():
         inv = form.save(commit=False)
         inv.user = request.user
@@ -99,7 +111,7 @@ def investor_create(request):
 @login_required
 def investor_edit(request, pk):
     investor = get_object_or_404(Investor, pk=pk, user=request.user)
-    form = InvestorForm(request.POST or None, instance=investor)
+    form = InvestorForm(request.POST or None, instance=investor, user=request.user)
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, "Инвестор обновлён.")
@@ -141,6 +153,7 @@ def investor_detail(request, pk):
         "earned": investor.earned_profit_total(),
         "paid": investor.settled_total(ProfitAllocation.STATUS_PAID_OUT),
         "reinvested": investor.settled_total(ProfitAllocation.STATUS_REINVESTED),
+        "unpaid": investor.unpaid_total(),
         "cap_labels": json.dumps(cap_labels),
         "cap_values": json.dumps(cap_values),
         "earn_labels": json.dumps(earn_labels),
@@ -236,15 +249,24 @@ def calculate_allocation(request):
     if account and form.is_valid():
         period_from = form.cleaned_data["period_from"]
         period_to = form.cleaned_data["period_to"]
+        action = request.POST.get("action") if request.method == "POST" else None
         try:
+            if action == "save":
+                preview = services.compute_allocation(request.user, period_from, period_to, account)
+                services.save_allocation(request.user, period_from, period_to, preview)
+                messages.success(request, "Аллокация сохранена и заморожена.")
+                return redirect(f"{request.path}?period_from={period_from}&period_to={period_to}")
+            if action in ("settle_paid", "settle_reinvest"):
+                status = (ProfitAllocation.STATUS_PAID_OUT if action == "settle_paid"
+                          else ProfitAllocation.STATUS_REINVESTED)
+                n = services.settle_period(request.user, account, period_from, period_to, status)
+                if status == ProfitAllocation.STATUS_PAID_OUT:
+                    _rebuild(account)
+                messages.success(request, f"Отмечено строк: {n}.")
+                return redirect(f"{request.path}?period_from={period_from}&period_to={period_to}")
             preview = services.compute_allocation(request.user, period_from, period_to, account)
         except ValidationError as e:
             messages.error(request, "; ".join(e.messages))
-
-        if request.method == "POST" and preview and request.POST.get("action") == "save":
-            services.save_allocation(request.user, period_from, period_to, preview)
-            messages.success(request, "Аллокация сохранена.")
-            return redirect(f"{request.path}?period_from={period_from}&period_to={period_to}")
 
     saved = (
         ProfitAllocation.objects.filter(investor__user=request.user)
@@ -252,13 +274,39 @@ def calculate_allocation(request):
         .order_by("-period_to", "-created_at", "investor__name")[:60]
     )
 
+    # Charts: earned by investor (preview period) + cumulative earned by investor.
+    earned_labels, earned_data = [], []
+    if preview:
+        for r in preview["rows"]:
+            if r["net_profit"]:
+                earned_labels.append(r["investor"].name)
+                earned_data.append(float(r["net_profit"]))
+
+    from collections import defaultdict
+    hist = (
+        ProfitAllocation.objects.filter(investor__user=request.user)
+        .select_related("investor").order_by("period_to")
+    )
+    periods = sorted({a.period_to for a in hist})
+    plabels = [p.strftime("%d.%m.%Y") for p in periods]
+    per = defaultdict(lambda: {p: 0.0 for p in periods})
+    for a in hist:
+        per[a.investor.name][a.period_to] += float(a.net_profit)
+    cum_datasets = []
+    for name, pmap in per.items():
+        running, series = 0.0, []
+        for p in periods:
+            running += pmap[p]
+            series.append(round(running, 2))
+        cum_datasets.append({"label": name, "data": series})
+
     return render(request, "investors/allocation.html", {
-        "form": form,
-        "preview": preview,
-        "account": account,
-        "period_from": period_from,
-        "period_to": period_to,
-        "saved": saved,
+        "form": form, "preview": preview, "account": account,
+        "period_from": period_from, "period_to": period_to, "saved": saved,
+        "earned_labels": json.dumps(earned_labels),
+        "earned_data": json.dumps(earned_data),
+        "cum_labels": json.dumps(plabels),
+        "cum_datasets": json.dumps(cum_datasets),
     })
 
 

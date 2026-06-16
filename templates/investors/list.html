@@ -36,6 +36,7 @@
         <th class="text-end">Заработано</th>
         <th class="text-end">Выплачено</th>
         <th class="text-end">Реинвест.</th>
+        <th class="text-end">Не выплачено</th>
         <th></th>
     </tr></thead>
     <tbody>
@@ -50,12 +51,13 @@
         <td class="num text-end {% if r.earned >= 0 %}pos{% else %}neg{% endif %}">{{ r.earned|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end">{{ r.paid|floatformat:0|intcomma }} ₽</td>
         <td class="num text-end">{{ r.reinvested|floatformat:0|intcomma }} ₽</td>
+        <td class="num text-end {% if r.unpaid > 0 %}pos{% endif %}">{{ r.unpaid|floatformat:0|intcomma }} ₽</td>
         <td class="text-end" style="white-space:nowrap;">
             <a href="{% url 'investors:detail' r.inv.pk %}" class="btn-ghost btn-xs">Открыть</a>
         </td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="10">Нет инвесторов</td></tr>
+    <tr class="empty-row"><td colspan="11">Нет инвесторов</td></tr>
     {% endfor %}
     </tbody>
 </table>

@@ -25,6 +25,9 @@
     <div class="kpi"><span class="accent-bar"></span>
         <div class="label">Реинвестировано</div>
         <div class="val num">{{ reinvested|floatformat:0|intcomma }} ₽</div></div>
+    <div class="kpi"><span class="accent-bar"></span>
+        <div class="label">Не выплачено (claim)</div>
+        <div class="val num {% if unpaid > 0 %}pos{% endif %}">{{ unpaid|floatformat:0|intcomma }} ₽</div></div>
 </div>
 
 <div class="row g-3" style="margin-bottom:22px;">

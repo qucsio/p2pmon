@@ -19,12 +19,22 @@ from apps.common.decimal_utils import q_rub
 from apps.investors.models import (
     Investor,
     InvestorCapitalTransaction,
+    InvestorPositionSnapshot,
     ProfitAllocation,
 )
 from apps.ledger.models import DailySnapshot, LedgerAdjustment
 
 HUNDRED = Decimal("100")
 EPS = Decimal("0.01")
+
+# Only genuine capital movements may be linked as investor contributions.
+# Tax payments, fee corrections and operational corrections are excluded.
+LINKABLE_ADJUSTMENT_TYPES = {
+    LedgerAdjustment.TYPE_DEPOSIT,
+    LedgerAdjustment.TYPE_WITHDRAWAL,
+    LedgerAdjustment.TYPE_INVESTOR_DEPOSIT,
+    LedgerAdjustment.TYPE_INVESTOR_WITHDRAWAL,
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -119,28 +129,49 @@ def capital_share_pct(investor, user=None, when=None) -> Decimal:
     return (iu / tu) * HUNDRED
 
 
+def day_open_unit_price(account, day, units_open) -> Decimal:
+    """Unit price at the START of `day` — equity at end of the prior day divided
+    by units already issued before that day. All transactions on the same day use
+    this single price, so same-day deposits never get different prices."""
+    if units_open <= 0:
+        return Decimal("1")
+    from datetime import timedelta
+
+    equity_prev = equity_as_of(account, day - timedelta(days=1))
+    if equity_prev <= 0:
+        return Decimal("1")
+    return equity_prev / units_open
+
+
 @transaction.atomic
 def recompute_units(user, account):
-    """Recompute unit_price and units_delta of every capital transaction in
-    chronological order. Keeps amount_rub fixed; makes results order-independent
-    so history can be entered/linked in any order."""
+    """Recompute unit_price/units_delta of every capital transaction in
+    chronological order. Amount stays fixed. All transactions on the same day
+    share one opening unit price (fairness), and ordering within a day cannot
+    skew prices."""
     txns = list(
         InvestorCapitalTransaction.objects.filter(investor__user=user)
         .order_by("effective_at", "id")
     )
     running = Decimal("0")
+    cur_day = None
+    day_open_units = Decimal("0")
     for t in txns:
+        d = t.effective_at.date()
+        if d != cur_day:
+            cur_day = d
+            day_open_units = running  # frozen for the whole day
+        price = day_open_unit_price(account, d, day_open_units)
         if t.type == InvestorCapitalTransaction.TYPE_PROFIT_PAYOUT:
             t.units_delta = Decimal("0")
-            t.unit_price = (
-                contribution_unit_price(user, account, t.effective_at, running)
-            )
+            t.unit_price = price
             t.save(update_fields=["units_delta", "unit_price"])
             continue
         if t.type == InvestorCapitalTransaction.TYPE_CORRECTION:
-            running += t.units_delta  # legacy/manual corrections kept as-is
+            t.unit_price = price or t.unit_price
+            t.save(update_fields=["unit_price"])
+            running += t.units_delta  # legacy/manual corrections keep their units
             continue
-        price = contribution_unit_price(user, account, t.effective_at, running)
         sign = Decimal("-1") if t.type == InvestorCapitalTransaction.TYPE_WITHDRAWAL else Decimal("1")
         t.unit_price = price
         t.units_delta = sign * (t.amount_rub / price)
@@ -154,6 +185,13 @@ def link_contribution(investor, adjustment, user, account, recompute=True):
     contribution (no new cash is created)."""
     if adjustment.investor_transactions.exists():
         raise ValidationError("Эта корректировка уже привязана к инвестору.")
+    if adjustment.type not in LINKABLE_ADJUSTMENT_TYPES:
+        raise ValidationError(
+            "Этот тип корректировки нельзя привязывать как капитал инвестора "
+            "(налоги и операционные корректировки исключены)."
+        )
+    if adjustment.account != LedgerAdjustment.ACCOUNT_BANK:
+        raise ValidationError("Привязывать можно только банковские (рублёвые) корректировки.")
     signed = adjustment.signed_amount_rub()
     if signed == 0:
         raise ValidationError("Корректировка не меняет банковский баланс в рублях.")
@@ -257,92 +295,124 @@ def withdraw(investor, amount_rub, effective_at, account, user, comment=""):
 # --------------------------------------------------------------------------- #
 # Profit allocation
 # --------------------------------------------------------------------------- #
-def compute_allocation(user, period_from, period_to, account):
-    """Return a preview of the profit split for the period (not persisted)."""
-    snaps = DailySnapshot.objects.filter(
-        exchange_account=account, day__gte=period_from, day__lte=period_to
-    )
-    gross = snaps.aggregate(t=Sum("gross_realized_pnl"))["t"] or Decimal("0")
-    fees = snaps.aggregate(t=Sum("fees"))["t"] or Decimal("0")
-    tax = snaps.aggregate(t=Sum("tax_accrual"))["t"] or Decimal("0")
-    net = snaps.aggregate(t=Sum("net_profit_after_tax"))["t"] or Decimal("0")
-
-    investors = list(Investor.objects.filter(user=user, is_active=True))
-    # Capital share as of the END of the period — so historical periods use the
-    # ownership that actually applied then, not today's.
-    period_end_dt = timezone.make_aware(datetime.combine(period_to, time.max))
-    caps = {inv.id: capital_share_pct(inv, user, when=period_end_dt) for inv in investors}
-
+def _day_shares(active, units, total_open):
+    """Per-day profit-share percentage by mode. fixed/multiplier take their cut,
+    same_as_capital splits the remainder by capital, none/split start at 0."""
     pct = {}
     fixed_total = Decimal("0")
     mult_total = Decimal("0")
-    same_group = []
-
-    for inv in investors:
-        if inv.profit_share_mode == Investor.PROFIT_FIXED_PCT:
+    same = []
+    cap = {}
+    for inv in active:
+        cap[inv.id] = (units[inv.id] / total_open * HUNDRED) if total_open > 0 else Decimal("0")
+    for inv in active:
+        m = inv.profit_share_mode
+        if m == Investor.PROFIT_FIXED_PCT:
             p = inv.profit_share_fixed_pct or Decimal("0")
             pct[inv.id] = p
             fixed_total += p
-        elif inv.profit_share_mode == Investor.PROFIT_MULTIPLIER:
-            p = caps[inv.id] * (inv.profit_share_multiplier or Decimal("0"))
+        elif m == Investor.PROFIT_MULTIPLIER:
+            p = cap[inv.id] * (inv.profit_share_multiplier or Decimal("0"))
             pct[inv.id] = p
             mult_total += p
-        elif inv.profit_share_mode == Investor.PROFIT_NONE:
+        elif m in (Investor.PROFIT_NONE, Investor.PROFIT_SPLIT):
             pct[inv.id] = Decimal("0")
-        else:  # same_as_capital — resolved after the fixed/multiplier pools
-            same_group.append(inv)
-
-    if fixed_total + mult_total > HUNDRED + EPS:
-        raise ValidationError(
-            f"Фиксированные и множительные доли превышают 100% "
-            f"({(fixed_total + mult_total):.2f}%). Уменьшите их."
-        )
-
+        else:
+            same.append(inv)
     remainder = HUNDRED - fixed_total - mult_total
-    same_cap_total = sum((caps[i.id] for i in same_group), Decimal("0"))
-    for inv in same_group:
-        pct[inv.id] = (
-            remainder * caps[inv.id] / same_cap_total
-            if same_cap_total > 0
-            else Decimal("0")
-        )
+    same_cap = sum((cap[i.id] for i in same), Decimal("0"))
+    for inv in same:
+        pct[inv.id] = (remainder * cap[inv.id] / same_cap) if same_cap > 0 else Decimal("0")
+    return pct, cap
+
+
+def compute_allocation(user, period_from, period_to, account):
+    """Day-by-day historical allocation. Each day's distributable profit
+    (``DailySnapshot.daily_total_equity_pnl`` = equity Δ minus capital flows) is
+    split using the ownership/state that existed *that day*, so a late investor
+    never receives profit earned before their deposit. ``split_from_investor``
+    transfers a share of the source's daily profit to the recipient."""
+    from collections import defaultdict
+
+    investors = list(Investor.objects.filter(user=user))
+    active = [i for i in investors if i.is_active]
+
+    snaps = list(
+        DailySnapshot.objects.filter(
+            exchange_account=account, day__gte=period_from, day__lte=period_to
+        ).order_by("day")
+    )
+    txns = list(
+        InvestorCapitalTransaction.objects.filter(
+            investor__user=user, effective_at__date__lte=period_to
+        ).order_by("effective_at", "id")
+    )
+
+    earned = defaultdict(lambda: Decimal("0"))
+    total_profit = Decimal("0")
+    units = defaultdict(lambda: Decimal("0"))
+    ti = 0
+
+    for snap in snaps:
+        day = snap.day
+        while ti < len(txns) and txns[ti].effective_at.date() < day:
+            units[txns[ti].investor_id] += txns[ti].units_delta
+            ti += 1
+        total_open = sum(units.values(), Decimal("0"))
+        day_profit = snap.daily_total_equity_pnl
+        total_profit += day_profit
+
+        pct, _cap = _day_shares(active, units, total_open)
+        base = {inv.id: day_profit * pct[inv.id] / HUNDRED for inv in active}
+        # split_from_investor: move a share of the source's daily profit
+        for inv in active:
+            if inv.profit_share_mode == Investor.PROFIT_SPLIT and inv.source_investor_id in base:
+                transfer = base[inv.source_investor_id] * (inv.split_percent or Decimal("0")) / HUNDRED
+                base[inv.id] += transfer
+                base[inv.source_investor_id] -= transfer
+        for k, v in base.items():
+            earned[k] += v
+
+    # Closing units / capital shares at period end.
+    while ti < len(txns):
+        units[txns[ti].investor_id] += txns[ti].units_delta
+        ti += 1
+    total_close = sum(units.values(), Decimal("0"))
+    price_end = (equity_as_of(account, period_to) / total_close) if total_close > 0 else Decimal("1")
 
     rows = []
-    allocated_pct = Decimal("0")
-    for inv in investors:
-        p = pct[inv.id]
-        allocated_pct += p
-        frac = p / HUNDRED
+    for inv in active:
+        e = q_rub(earned[inv.id])
+        cap_pct = (units[inv.id] / total_close * HUNDRED) if total_close > 0 else Decimal("0")
         rows.append({
             "investor": inv,
-            "capital_share_pct": caps[inv.id],
-            "profit_share_pct": p,
-            "gross_profit": q_rub(gross * frac),
-            "fees_part": q_rub(fees * frac),
-            "tax_part": q_rub(tax * frac),
-            "net_profit": q_rub(net * frac),
+            "closing_units": units[inv.id],
+            "unit_price": price_end,
+            "capital_value": q_rub(units[inv.id] * price_end),
+            "capital_share_pct": cap_pct,
+            "profit_share_pct": (e / total_profit * HUNDRED) if total_profit else Decimal("0"),
+            "net_profit": e,
         })
 
     return {
-        "gross": gross, "fees": fees, "tax": tax, "net": net,
+        "profit": total_profit,
         "rows": rows,
-        "allocated_pct": allocated_pct,
-        "leftover_pct": HUNDRED - allocated_pct,
+        "allocated": sum((r["net_profit"] for r in rows), Decimal("0")),
+        "period_from": period_from,
+        "period_to": period_to,
     }
 
 
 @transaction.atomic
 def save_allocation(user, period_from, period_to, preview):
-    """Persist a profit-allocation snapshot. Replaces only unsettled rows for
-    the period, leaving already paid/reinvested allocations frozen."""
+    """Persist & freeze a profit-allocation snapshot. Replaces only unsettled
+    rows for the period; already paid/reinvested allocations stay frozen."""
+    from datetime import timedelta
+
     ProfitAllocation.objects.filter(
-        investor__user=user,
-        period_from=period_from,
-        period_to=period_to,
+        investor__user=user, period_from=period_from, period_to=period_to,
         status=ProfitAllocation.STATUS_UNPAID,
     ).delete()
-
-    # Investors already settled for this period stay frozen — don't duplicate them.
     settled_ids = set(
         ProfitAllocation.objects.filter(
             investor__user=user, period_from=period_from, period_to=period_to
@@ -353,20 +423,41 @@ def save_allocation(user, period_from, period_to, preview):
 
     created = []
     for r in preview["rows"]:
-        if r["investor"].id in settled_ids:
+        inv = r["investor"]
+        if inv.id in settled_ids:
             continue
         created.append(ProfitAllocation.objects.create(
-            period_from=period_from,
-            period_to=period_to,
-            investor=r["investor"],
+            period_from=period_from, period_to=period_to, investor=inv,
             share_percent=r["profit_share_pct"],
             capital_share_pct=r["capital_share_pct"],
             profit_share_pct=r["profit_share_pct"],
-            gross_profit=r["gross_profit"],
-            fees_part=r["fees_part"],
-            tax_part=r["tax_part"],
             net_profit=r["net_profit"],
         ))
+
+        opening = (
+            inv.capital_transactions.filter(effective_at__date__lt=period_from)
+            .aggregate(t=Sum("units_delta"))["t"] or Decimal("0")
+        )
+        cumulative = (
+            inv.allocations.filter(period_to__lte=period_to)
+            .aggregate(t=Sum("net_profit"))["t"] or Decimal("0")
+        )
+        InvestorPositionSnapshot.objects.update_or_create(
+            investor=inv, period_from=period_from, period_to=period_to,
+            defaults={
+                "opening_units": opening,
+                "closing_units": r["closing_units"],
+                "unit_price": r["unit_price"],
+                "capital_value_rub": r["capital_value"],
+                "capital_share_pct": r["capital_share_pct"],
+                "profit_share_pct": r["profit_share_pct"],
+                "earned_profit_rub": r["net_profit"],
+                "cumulative_earned_profit_rub": cumulative,
+                "unpaid_profit_rub": r["net_profit"],
+                "paid_out_profit_rub": Decimal("0"),
+                "reinvested_profit_rub": Decimal("0"),
+            },
+        )
     return created
 
 
@@ -424,17 +515,95 @@ def settle_allocation(allocation, status, account, user, effective_at=None):
     allocation.settled_at = effective_at
     allocation.settlement_txn = txn
     allocation.save(update_fields=["status", "settled_at", "settlement_txn"])
+    _sync_snapshot_settlement(allocation)
     recompute_units(user, account)
     return allocation
 
 
+def _sync_snapshot_settlement(a):
+    snap = InvestorPositionSnapshot.objects.filter(
+        investor=a.investor, period_from=a.period_from, period_to=a.period_to
+    ).first()
+    if not snap:
+        return
+    paid = reinv = unpaid = Decimal("0")
+    if a.status == ProfitAllocation.STATUS_PAID_OUT:
+        paid = a.net_profit
+    elif a.status == ProfitAllocation.STATUS_REINVESTED:
+        reinv = a.net_profit
+    else:
+        unpaid = a.net_profit
+    snap.paid_out_profit_rub = paid
+    snap.reinvested_profit_rub = reinv
+    snap.unpaid_profit_rub = unpaid
+    snap.save(update_fields=["paid_out_profit_rub", "reinvested_profit_rub", "unpaid_profit_rub"])
+
+
+@transaction.atomic
+def settle_period(user, account, period_from, period_to, status, effective_at=None):
+    """Batch-settle every unpaid allocation in a period at one consistent
+    (same-day) unit price. Supports paid_out and reinvested."""
+    if status not in (ProfitAllocation.STATUS_PAID_OUT, ProfitAllocation.STATUS_REINVESTED):
+        raise ValidationError("Пакетно можно отметить только «выплачено» или «реинвестировано».")
+    effective_at = effective_at or timezone.now()
+    allocs = list(
+        ProfitAllocation.objects.filter(
+            investor__user=user, period_from=period_from, period_to=period_to,
+            status=ProfitAllocation.STATUS_UNPAID,
+        ).select_related("investor")
+    )
+    if not allocs:
+        raise ValidationError("Нет невыплаченных аллокаций за этот период.")
+
+    price = current_unit_price(user, account)  # recompute re-derives day-open price
+    for a in allocs:
+        amount = a.net_profit
+        txn = None
+        if amount != 0 and status == ProfitAllocation.STATUS_REINVESTED:
+            txn = InvestorCapitalTransaction.objects.create(
+                investor=a.investor,
+                type=InvestorCapitalTransaction.TYPE_PROFIT_REINVEST,
+                amount_rub=amount, units_delta=(amount / price if price else Decimal("0")),
+                unit_price=price, effective_at=effective_at,
+                comment=f"Реинвест прибыли {period_from}–{period_to}",
+            )
+        elif amount != 0 and status == ProfitAllocation.STATUS_PAID_OUT:
+            adj = None
+            if account:
+                adj = LedgerAdjustment.objects.create(
+                    exchange_account=account, account=LedgerAdjustment.ACCOUNT_BANK,
+                    type=LedgerAdjustment.TYPE_INVESTOR_WITHDRAWAL, currency="RUB",
+                    amount_rub=amount, effective_at=effective_at,
+                    comment=f"Выплата прибыли: {a.investor.name}",
+                    include_in_ledger=True, created_by=user,
+                )
+            txn = InvestorCapitalTransaction.objects.create(
+                investor=a.investor,
+                type=InvestorCapitalTransaction.TYPE_PROFIT_PAYOUT,
+                amount_rub=amount, units_delta=Decimal("0"), unit_price=price,
+                effective_at=effective_at, linked_ledger_adjustment=adj,
+                comment=f"Выплата прибыли {period_from}–{period_to}",
+            )
+        a.status = status
+        a.settled_at = effective_at
+        a.settlement_txn = txn
+        a.save(update_fields=["status", "settled_at", "settlement_txn"])
+        _sync_snapshot_settlement(a)
+
+    recompute_units(user, account)
+    return len(allocs)
+
+
 # --------------------------------------------------------------------------- #
-# Initialization (units from legacy share_percent)
+# EMERGENCY ONLY — legacy current-state seeding.
 # --------------------------------------------------------------------------- #
 @transaction.atomic
-def initialize_units(user, account, force=False):
-    """Create initial capital units from legacy ``share_percent`` using current
-    portfolio equity as the baseline. Idempotent unless ``force``."""
+def emergency_seed_units_from_shares(user, account, force=False):
+    """⚠️ EMERGENCY / TEST ONLY. Seeds units from the *current* equity and legacy
+    ``share_percent``, dating everyone "now". This IGNORES real entry dates and
+    will wrongly grant late investors a share of earlier profit. The correct flow
+    is historical contribution linking (see `link_contribution`). Do not use in
+    normal operation."""
     investors = list(Investor.objects.filter(user=user))
     if not investors:
         return 0
