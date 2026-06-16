@@ -400,7 +400,9 @@ def profit_report(user, account, period_from=None, period_to=None):
 
     for snap in snaps:
         day = snap.day
-        while ti < len(txns) and txns[ti].effective_at.date() < day:
+        # Deposit-day rule: a contribution effective on day D participates in day D's
+        # profit (interval starts on the capital-event date, e.g. 2026-05-19 → …).
+        while ti < len(txns) and txns[ti].effective_at.date() <= day:
             units[txns[ti].investor_id] += txns[ti].units_delta
             ti += 1
         total_open = sum(units.values(), Decimal("0"))
@@ -445,6 +447,34 @@ def profit_report(user, account, period_from=None, period_to=None):
         "series_labels": series_labels,
         "series": dict(series),
     }
+
+
+def capital_value_series(user, account, investor):
+    """Daily capital value for one investor: for each snapshot day,
+    investor_units(end of day) × (equity / total_units(end of day))."""
+    from collections import defaultdict
+
+    snaps = list(
+        DailySnapshot.objects.filter(exchange_account=account).order_by("day")
+    )
+    txns = list(
+        InvestorCapitalTransaction.objects.filter(
+            investor__user=user, type__in=CAPITAL_EVENT_TYPES
+        ).order_by("effective_at", "id")
+    )
+    units = defaultdict(lambda: Decimal("0"))
+    ti = 0
+    labels, values = [], []
+    for snap in snaps:
+        day = snap.day
+        while ti < len(txns) and txns[ti].effective_at.date() <= day:
+            units[txns[ti].investor_id] += txns[ti].units_delta
+            ti += 1
+        total = sum(units.values(), Decimal("0"))
+        price = (snap.total_equity / total) if total > 0 else Decimal("0")
+        labels.append(day.strftime("%d.%m.%Y"))
+        values.append(float(units[investor.id] * price))
+    return labels, values
 
 
 def capital_summary(user, account):

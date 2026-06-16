@@ -91,25 +91,8 @@ class Investor(TimestampedModel):
             or Decimal("0")
         )
 
-    def earned_profit_total(self) -> Decimal:
-        return self.allocations.aggregate(t=Sum("net_profit"))["t"] or Decimal("0")
-
-    def settled_total(self, status) -> Decimal:
-        return (
-            self.allocations.filter(status=status).aggregate(t=Sum("net_profit"))["t"]
-            or Decimal("0")
-        )
-
-    def unpaid_total(self) -> Decimal:
-        return self.settled_total(ProfitAllocation.STATUS_UNPAID_CLAIM)
-
-    def retained_total(self) -> Decimal:
-        return self.settled_total(ProfitAllocation.STATUS_RETAINED)
-
-    @property
-    def profit_is_claim(self) -> bool:
-        """True when this participant's profit is a payable claim (not in NAV)."""
-        return self.profit_share_mode in (self.PROFIT_SPLIT, self.PROFIT_FIXED_PCT)
+    # NOTE: lifetime "earned profit" is NOT derived from ProfitAllocation rows.
+    # It is computed live in services.profit_report() over automatic intervals.
 
 
 class InvestorCapitalTransaction(TimestampedModel):

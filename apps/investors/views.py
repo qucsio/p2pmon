@@ -126,12 +126,8 @@ def investor_detail(request, pk):
         investor.capital_transactions.filter(type__in=services.CAPITAL_EVENT_TYPES)
         .order_by("effective_at", "id")
     )
-    cap_labels, cap_values = [], []
-    cum_units = Decimal("0")
-    for t in txns:
-        cum_units += t.units_delta
-        cap_labels.append(t.effective_at.strftime("%d.%m.%Y"))
-        cap_values.append(float(cum_units * t.unit_price))
+    # True capital value over time: daily units × daily unit price (not tx-based).
+    cap_labels, cap_values = services.capital_value_series(request.user, account, investor)
 
     earn_series = report.get("series", {}).get(investor.id, [])
     earn_labels = report.get("series_labels", [])
