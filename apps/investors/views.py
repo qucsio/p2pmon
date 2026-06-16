@@ -11,6 +11,13 @@ from django.utils import timezone
 from apps.common.helpers import get_active_account
 from apps.investors import services
 from apps.investors.models import Investor, InvestorCapitalTransaction, ProfitAllocation
+from apps.ledger.models import LedgerAdjustment
+from apps.ledger.tasks import rebuild_ledger
+
+
+def _rebuild(account):
+    if account:
+        rebuild_ledger.delay(account.id)
 
 
 class InvestorForm(forms.ModelForm):
@@ -168,12 +175,55 @@ def _capital_txn(request, pk, is_deposit):
                 account, request.user,
                 comment=form.cleaned_data["comment"],
             )
-            messages.success(request, f"{'Депозит' if is_deposit else 'Вывод'} проведён. Пересчитайте леджер для обновления equity.")
+            _rebuild(account)
+            messages.success(request, f"{'Депозит' if is_deposit else 'Вывод'} проведён. Леджер пересчитывается.")
             return redirect("investors:detail", pk=pk)
         except ValidationError as e:
             form.add_error(None, e)
 
     return render(request, "investors/form.html", {"form": form, "title": title})
+
+
+@login_required
+def contribution_history(request):
+    """Link existing ledger adjustments (money already in the portfolio) to
+    investors as dated capital contributions — without creating new cash."""
+    account = get_active_account(request.user)
+    investors = list(Investor.objects.filter(user=request.user).order_by("name"))
+
+    if request.method == "POST" and account:
+        adj = get_object_or_404(
+            LedgerAdjustment, pk=request.POST.get("adjustment_id"),
+            exchange_account=account, is_deleted=False,
+        )
+        investor = get_object_or_404(
+            Investor, pk=request.POST.get("investor_id"), user=request.user
+        )
+        try:
+            services.link_contribution(investor, adj, request.user, account)
+            messages.success(request, f"Привязано к {investor.name}.")
+        except ValidationError as e:
+            messages.error(request, "; ".join(e.messages))
+        return redirect("investors:history")
+
+    unlinked, linked = [], []
+    if account:
+        for adj in (
+            account.adjustments.filter(is_deleted=False, account=LedgerAdjustment.ACCOUNT_BANK)
+            .prefetch_related("investor_transactions__investor")
+            .order_by("effective_at")
+        ):
+            itx = adj.investor_transactions.all()
+            if adj.signed_amount_rub() == 0:
+                continue
+            (linked if itx else unlinked).append(adj)
+
+    return render(request, "investors/history.html", {
+        "account": account,
+        "investors": investors,
+        "unlinked": unlinked,
+        "linked": linked,
+    })
 
 
 @login_required
@@ -222,6 +272,8 @@ def allocation_settle(request, pk):
     else:
         try:
             services.settle_allocation(allocation, status, account, request.user)
+            if status == ProfitAllocation.STATUS_PAID_OUT:
+                _rebuild(account)  # payout posts a ledger withdrawal
             messages.success(request, "Статус обновлён.")
         except ValidationError as e:
             messages.error(request, "; ".join(e.messages))

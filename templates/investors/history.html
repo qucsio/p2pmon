@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}История взносов{% endblock %}
+{% block heading %}История взносов{% endblock %}
+{% block topbar_extra %}
+<div class="topbar-actions"><a href="{% url 'investors:list' %}" class="btn-ghost">← К инвесторам</a></div>
+{% endblock %}
+{% block content %}
+
+<p style="color:var(--txt-3);font-size:12.5px;margin-bottom:18px;max-width:760px;">
+    Деньги инвесторов уже проведены в леджере. Привяжите каждую банковскую корректировку к инвестору —
+    это создаст капитальный взнос на её дату (цена юнита берётся из equity на тот момент). Новый кэш не создаётся.
+</p>
+
+<div class="section-label">Не привязанные корректировки</div>
+<div class="panel table-panel panel-pad-0" style="margin-bottom:24px;">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма</th><th>Комментарий</th><th>Привязать к инвестору</th></tr></thead>
+    <tbody>
+    {% for a in unlinked %}
+    <tr>
+        <td class="num" style="white-space:nowrap;">{{ a.effective_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ a.get_type_display }}</td>
+        <td class="num text-end {% if a.signed_amount_rub >= 0 %}pos{% else %}neg{% endif %}">{{ a.signed_amount_rub|floatformat:0|intcomma }} ₽</td>
+        <td style="color:var(--txt-2);">{{ a.comment|truncatechars:36 }}</td>
+        <td>
+            <form method="post" style="display:flex;gap:8px;align-items:center;">{% csrf_token %}
+                <input type="hidden" name="adjustment_id" value="{{ a.pk }}">
+                <select name="investor_id" required style="max-width:200px;">
+                    <option value="">— выбрать —</option>
+                    {% for inv in investors %}<option value="{{ inv.pk }}">{{ inv.name }}</option>{% endfor %}
+                </select>
+                <button class="btn-ghost btn-xs ok" type="submit">Привязать</button>
+            </form>
+        </td>
+    </tr>
+    {% empty %}
+    <tr class="empty-row"><td colspan="5">Все банковские корректировки привязаны</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+
+<div class="section-label">Привязанные</div>
+<div class="panel table-panel panel-pad-0">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr><th>Дата</th><th>Тип</th><th class="text-end">Сумма</th><th>Инвестор</th></tr></thead>
+    <tbody>
+    {% for a in linked %}
+    {% with itx=a.investor_transactions.all.0 %}
+    <tr>
+        <td class="num" style="white-space:nowrap;">{{ a.effective_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ a.get_type_display }}</td>
+        <td class="num text-end {% if a.signed_amount_rub >= 0 %}pos{% else %}neg{% endif %}">{{ a.signed_amount_rub|floatformat:0|intcomma }} ₽</td>
+        <td><a href="{% url 'investors:detail' itx.investor.pk %}" style="color:var(--blue);">{{ itx.investor.name }}</a></td>
+    </tr>
+    {% endwith %}
+    {% empty %}
+    <tr class="empty-row"><td colspan="4">Пока ничего не привязано</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+{% endblock %}

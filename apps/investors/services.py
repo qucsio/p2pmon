@@ -7,6 +7,7 @@ investors are not diluted), and they post a matching LedgerAdjustment so the
 portfolio cash actually moves. Profit allocation is a separate concept driven
 by each investor's ``profit_share_mode``.
 """
+from datetime import datetime, time
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -48,6 +49,35 @@ def total_units(user) -> Decimal:
     )
 
 
+def units_as_of(user, when) -> Decimal:
+    return (
+        InvestorCapitalTransaction.objects.filter(
+            investor__user=user, effective_at__lte=when
+        ).aggregate(t=Sum("units_delta"))["t"]
+        or Decimal("0")
+    )
+
+
+def investor_units_as_of(investor, when) -> Decimal:
+    return (
+        investor.capital_transactions.filter(effective_at__lte=when)
+        .aggregate(t=Sum("units_delta"))["t"]
+        or Decimal("0")
+    )
+
+
+def equity_as_of(account, day) -> Decimal:
+    """Latest snapshot equity on or before `day` (a date)."""
+    if not account:
+        return Decimal("0")
+    snap = (
+        DailySnapshot.objects.filter(exchange_account=account, day__lte=day)
+        .order_by("-day")
+        .first()
+    )
+    return snap.total_equity if snap else Decimal("0")
+
+
 def current_unit_price(user, account) -> Decimal:
     """Price of one unit in RUB. Never returns zero once units exist."""
     tu = total_units(user)
@@ -60,12 +90,88 @@ def current_unit_price(user, account) -> Decimal:
     return equity / tu
 
 
-def capital_share_pct(investor, user=None) -> Decimal:
+def contribution_unit_price(user, account, when, units_before=None) -> Decimal:
+    """Unit price used to value a contribution at `when` — equity at the start of
+    that day (prior snapshot) divided by units already issued. Par for genesis."""
+    if units_before is None:
+        units_before = units_as_of(user, when) - Decimal("0")  # excludes nothing
+    if units_before <= 0:
+        return Decimal("1")
+    from datetime import timedelta
+
+    prev_day = (when.date() if hasattr(when, "date") else when) - timedelta(days=1)
+    equity = equity_as_of(account, prev_day)
+    if equity <= 0:
+        return Decimal("1")
+    return equity / units_before
+
+
+def capital_share_pct(investor, user=None, when=None) -> Decimal:
     user = user or investor.user
-    tu = total_units(user)
+    if when is not None:
+        tu = units_as_of(user, when)
+        iu = investor_units_as_of(investor, when)
+    else:
+        tu = total_units(user)
+        iu = investor.units
     if tu <= 0:
         return Decimal("0")
-    return (investor.units / tu) * HUNDRED
+    return (iu / tu) * HUNDRED
+
+
+@transaction.atomic
+def recompute_units(user, account):
+    """Recompute unit_price and units_delta of every capital transaction in
+    chronological order. Keeps amount_rub fixed; makes results order-independent
+    so history can be entered/linked in any order."""
+    txns = list(
+        InvestorCapitalTransaction.objects.filter(investor__user=user)
+        .order_by("effective_at", "id")
+    )
+    running = Decimal("0")
+    for t in txns:
+        if t.type == InvestorCapitalTransaction.TYPE_PROFIT_PAYOUT:
+            t.units_delta = Decimal("0")
+            t.unit_price = (
+                contribution_unit_price(user, account, t.effective_at, running)
+            )
+            t.save(update_fields=["units_delta", "unit_price"])
+            continue
+        if t.type == InvestorCapitalTransaction.TYPE_CORRECTION:
+            running += t.units_delta  # legacy/manual corrections kept as-is
+            continue
+        price = contribution_unit_price(user, account, t.effective_at, running)
+        sign = Decimal("-1") if t.type == InvestorCapitalTransaction.TYPE_WITHDRAWAL else Decimal("1")
+        t.unit_price = price
+        t.units_delta = sign * (t.amount_rub / price)
+        t.save(update_fields=["units_delta", "unit_price"])
+        running += t.units_delta
+
+
+@transaction.atomic
+def link_contribution(investor, adjustment, user, account, recompute=True):
+    """Attach an existing bank LedgerAdjustment to an investor as a capital
+    contribution (no new cash is created)."""
+    if adjustment.investor_transactions.exists():
+        raise ValidationError("Эта корректировка уже привязана к инвестору.")
+    signed = adjustment.signed_amount_rub()
+    if signed == 0:
+        raise ValidationError("Корректировка не меняет банковский баланс в рублях.")
+    is_deposit = signed > 0
+    txn = InvestorCapitalTransaction.objects.create(
+        investor=investor,
+        type=(InvestorCapitalTransaction.TYPE_DEPOSIT if is_deposit
+              else InvestorCapitalTransaction.TYPE_WITHDRAWAL),
+        amount_rub=abs(signed),
+        units_delta=Decimal("0"),  # filled by recompute
+        unit_price=Decimal("0"),
+        effective_at=adjustment.effective_at,
+        linked_ledger_adjustment=adjustment,
+        comment=f"Привязка истории: {adjustment.get_type_display()}",
+    )
+    if recompute:
+        recompute_units(user, account)
+    return txn
 
 
 # --------------------------------------------------------------------------- #
@@ -93,7 +199,7 @@ def deposit(investor, amount_rub, effective_at, account, user, comment=""):
         include_in_ledger=True,
         created_by=user,
     )
-    return InvestorCapitalTransaction.objects.create(
+    txn = InvestorCapitalTransaction.objects.create(
         investor=investor,
         type=InvestorCapitalTransaction.TYPE_DEPOSIT,
         amount_rub=amount_rub,
@@ -103,6 +209,8 @@ def deposit(investor, amount_rub, effective_at, account, user, comment=""):
         linked_ledger_adjustment=adj,
         comment=comment,
     )
+    recompute_units(user, account)
+    return txn
 
 
 @transaction.atomic
@@ -132,7 +240,7 @@ def withdraw(investor, amount_rub, effective_at, account, user, comment=""):
         include_in_ledger=True,
         created_by=user,
     )
-    return InvestorCapitalTransaction.objects.create(
+    txn = InvestorCapitalTransaction.objects.create(
         investor=investor,
         type=InvestorCapitalTransaction.TYPE_WITHDRAWAL,
         amount_rub=amount_rub,
@@ -142,6 +250,8 @@ def withdraw(investor, amount_rub, effective_at, account, user, comment=""):
         linked_ledger_adjustment=adj,
         comment=comment,
     )
+    recompute_units(user, account)
+    return txn
 
 
 # --------------------------------------------------------------------------- #
@@ -158,7 +268,10 @@ def compute_allocation(user, period_from, period_to, account):
     net = snaps.aggregate(t=Sum("net_profit_after_tax"))["t"] or Decimal("0")
 
     investors = list(Investor.objects.filter(user=user, is_active=True))
-    caps = {inv.id: capital_share_pct(inv, user) for inv in investors}
+    # Capital share as of the END of the period — so historical periods use the
+    # ownership that actually applied then, not today's.
+    period_end_dt = timezone.make_aware(datetime.combine(period_to, time.max))
+    caps = {inv.id: capital_share_pct(inv, user, when=period_end_dt) for inv in investors}
 
     pct = {}
     fixed_total = Decimal("0")
@@ -311,6 +424,7 @@ def settle_allocation(allocation, status, account, user, effective_at=None):
     allocation.settled_at = effective_at
     allocation.settlement_txn = txn
     allocation.save(update_fields=["status", "settled_at", "settlement_txn"])
+    recompute_units(user, account)
     return allocation
 
 

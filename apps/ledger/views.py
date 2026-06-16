@@ -1,3 +1,4 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -13,7 +14,11 @@ def adjustment_list(request):
     account = get_active_account(request.user)
     adjustments = []
     if account:
-        adjustments = account.adjustments.filter(is_deleted=False).order_by("-effective_at")
+        adjustments = (
+            account.adjustments.filter(is_deleted=False)
+            .prefetch_related("investor_transactions__investor")
+            .order_by("-effective_at")
+        )
     return render(request, "ledger/adjustment_list.html", {
         "account": account,
         "adjustments": adjustments,
@@ -51,6 +56,9 @@ def adjustment_edit(request, pk):
         exchange_account__user=request.user,
         is_deleted=False,
     )
+    if adj.investor_transactions.exists():
+        messages.error(request, "Эта корректировка управляется инвестором — изменяйте её во вкладке «Инвесторы».")
+        return redirect("ledger:adjustment_list")
     form = AdjustmentForm(request.POST or None, instance=adj)
     if request.method == "POST" and form.is_valid():
         form.save()
@@ -71,6 +79,9 @@ def adjustment_delete(request, pk):
         exchange_account__user=request.user,
         is_deleted=False,
     )
+    if adj.investor_transactions.exists():
+        messages.error(request, "Эта корректировка управляется инвестором — удаляйте её во вкладке «Инвесторы».")
+        return redirect("ledger:adjustment_list")
     if request.method == "POST":
         adj.is_deleted = True
         adj.deleted_at = timezone.now()

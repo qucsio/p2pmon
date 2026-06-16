@@ -23,8 +23,14 @@
         <td>{{ a.currency }}</td>
         <td>{{ a.comment|truncatechars:40 }}</td>
         <td class="text-end" style="white-space:nowrap;">
+            {% with itx=a.investor_transactions.all.0 %}
+            {% if itx %}
+            <a href="{% url 'investors:detail' itx.investor.pk %}" class="pill" style="color:var(--blue);background:var(--blue-soft);text-decoration:none;">инвестор: {{ itx.investor.name }}</a>
+            {% else %}
             <a href="{% url 'ledger:adjustment_edit' a.pk %}" class="btn-ghost btn-xs">Изменить</a>
             <a href="{% url 'ledger:adjustment_delete' a.pk %}" class="btn-ghost btn-xs danger">Удалить</a>
+            {% endif %}
+            {% endwith %}
         </td>
     </tr>
     {% empty %}

@@ -87,7 +87,7 @@ class AllocationTests(CapitalTestBase):
         c = self.mk("C", profit_share_mode=Investor.PROFIT_FIXED_PCT,
                     profit_share_fixed_pct=Decimal("10"))
         self._period_net("10000")
-        res = services.compute_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), self.account)
+        res = services.compute_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), self.account)
         row = next(r for r in res["rows"] if r["investor"].id == c.id)
         self.assertEqual(row["capital_share_pct"], Decimal("0"))
         self.assertEqual(row["profit_share_pct"], Decimal("10"))
@@ -99,7 +99,7 @@ class AllocationTests(CapitalTestBase):
         self.b = self.mk("B", Decimal("50"))
         services.initialize_units(self.user, self.account)
         self._period_net("10000")
-        res = services.compute_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), self.account)
+        res = services.compute_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), self.account)
         row = next(r for r in res["rows"] if r["investor"].id == self.a.id)
         # capital share 50% * 0.5 = 25%
         self.assertAlmostEqual(row["profit_share_pct"], Decimal("25"))
@@ -108,7 +108,7 @@ class AllocationTests(CapitalTestBase):
     def test_same_as_capital_absorbs_remainder(self):
         self.init_5050()
         self._period_net("10000")
-        res = services.compute_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), self.account)
+        res = services.compute_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), self.account)
         # both same_as_capital, equal capital → 50/50, fully allocated
         self.assertAlmostEqual(res["allocated_pct"], Decimal("100"))
         for r in res["rows"]:
@@ -120,8 +120,8 @@ class SettlementTests(CapitalTestBase):
         self.init_5050()
         self.snap.net_profit_after_tax = Decimal(net)
         self.snap.save()
-        preview = services.compute_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), self.account)
-        return services.save_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), preview)
+        preview = services.compute_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), self.account)
+        return services.save_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), preview)
 
     def test_reinvest_increases_capital(self):
         self._alloc()
@@ -143,8 +143,8 @@ class SettlementTests(CapitalTestBase):
         services.settle_allocation(alloc, ProfitAllocation.STATUS_PAID_OUT, self.account, self.user)
         frozen_amount = alloc.net_profit
         # re-saving the same period must not touch settled rows
-        preview = services.compute_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), self.account)
-        services.save_allocation(self.user, date(2026, 1, 1), date(2026, 1, 1), preview)
+        preview = services.compute_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), self.account)
+        services.save_allocation(self.user, date(2000, 1, 1), date(2100, 1, 1), preview)
         alloc.refresh_from_db()
         self.assertEqual(alloc.status, ProfitAllocation.STATUS_PAID_OUT)
         self.assertEqual(alloc.net_profit, frozen_amount)

@@ -4,6 +4,7 @@
 {% block heading %}Инвесторы{% endblock %}
 {% block topbar_extra %}
 <div class="topbar-actions">
+    <a href="{% url 'investors:history' %}" class="btn-ghost">История взносов</a>
     <a href="{% url 'investors:allocation' %}" class="btn-ghost">Распределение прибыли</a>
     <a href="{% url 'investors:create' %}" class="btn-accent">+ Добавить</a>
 </div>

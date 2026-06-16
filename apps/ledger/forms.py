@@ -26,6 +26,14 @@ class AdjustmentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
             self.fields["amount"].initial = self.instance.display_amount
+        # Investor deposits/withdrawals are managed from the Investors tab, not here.
+        investor_types = {
+            LedgerAdjustment.TYPE_INVESTOR_DEPOSIT,
+            LedgerAdjustment.TYPE_INVESTOR_WITHDRAWAL,
+        }
+        self.fields["type"].choices = [
+            c for c in self.fields["type"].choices if c[0] not in investor_types
+        ]
 
     def save(self, commit=True):
         obj = super().save(commit=False)
