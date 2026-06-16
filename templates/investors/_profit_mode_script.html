@@ -1,0 +1,19 @@
+<script>
+(function(){
+    function syncBlock(block){
+        const fieldId = block.dataset.modeField;
+        const select = fieldId ? document.getElementById(fieldId) : block.querySelector('select');
+        if(!select) return;
+        const show = () => {
+            const mode = select.value;
+            block.querySelectorAll('.profit-opt').forEach(el => {
+                const modes = (el.dataset.showFor || '').split(/\s+/);
+                el.style.display = modes.includes(mode) ? '' : 'none';
+            });
+        };
+        select.addEventListener('change', show);
+        show();
+    }
+    document.querySelectorAll('[data-profit-block]').forEach(syncBlock);
+})();
+</script>

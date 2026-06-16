@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Изменить — {{ investor.name }}{% endblock %}
+{% block heading %}{{ investor.name }}{% endblock %}
+{% block topbar_extra %}
+<div class="topbar-actions">
+    <a href="{% url 'investors:detail' investor.pk %}" class="btn-ghost">← К карточке</a>
+</div>
+{% endblock %}
+{% block content %}
+
+<form method="post">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="section-label">Основное</div>
+    <div class="panel form-panel" style="margin-bottom:22px;">
+        <div class="form-grid">
+            <div class="form-field span-2">
+                <label class="form-label" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+                {{ form.name }}
+                {% if form.name.errors %}<div class="neg">{{ form.name.errors }}</div>{% endif %}
+            </div>
+            <div class="form-field form-check-row">
+                <label class="switch">{{ form.is_active }}<span class="track"></span>{{ form.is_active.label }}</label>
+            </div>
+            <div class="form-field span-full">
+                <label class="form-label" for="{{ form.comment.id_for_label }}">{{ form.comment.label }}</label>
+                {{ form.comment }}
+            </div>
+        </div>
+    </div>
+
+    <div class="section-label">Соглашение о прибыли</div>
+    <div class="panel form-panel" style="margin-bottom:22px;">
+        <p class="panel-hint">Используется по умолчанию и для дней без отдельного правила с даты. Чтобы изменить условия с конкретного числа — добавьте правило ниже.</p>
+        <div class="profit-block" data-profit-block data-mode-field="{{ form.profit_share_mode.id_for_label }}">
+            <div class="form-grid">
+                <div class="form-field span-2">
+                    <label class="form-label" for="{{ form.profit_share_mode.id_for_label }}">{{ form.profit_share_mode.label }}</label>
+                    {{ form.profit_share_mode }}
+                    {% if form.profit_share_mode.errors %}<div class="neg">{{ form.profit_share_mode.errors }}</div>{% endif %}
+                </div>
+                <div class="form-field profit-opt" data-show-for="multiplier">
+                    <label class="form-label" for="{{ form.profit_share_multiplier.id_for_label }}">{{ form.profit_share_multiplier.label }}</label>
+                    {{ form.profit_share_multiplier }}
+                    <div class="help">Доля от валовой прибыли по участию, напр. 0.5 = 50%</div>
+                    {% if form.profit_share_multiplier.errors %}<div class="neg">{{ form.profit_share_multiplier.errors }}</div>{% endif %}
+                </div>
+                <div class="form-field profit-opt" data-show-for="fixed_pct">
+                    <label class="form-label" for="{{ form.profit_share_fixed_pct.id_for_label }}">{{ form.profit_share_fixed_pct.label }}</label>
+                    {{ form.profit_share_fixed_pct }}
+                    <div class="help">Процент от прибыли фонда за день</div>
+                    {% if form.profit_share_fixed_pct.errors %}<div class="neg">{{ form.profit_share_fixed_pct.errors }}</div>{% endif %}
+                </div>
+                <div class="form-field profit-opt span-2" data-show-for="split_from_investor">
+                    <label class="form-label" for="{{ form.source_investor.id_for_label }}">{{ form.source_investor.label }}</label>
+                    {{ form.source_investor }}
+                    {% if form.source_investor.errors %}<div class="neg">{{ form.source_investor.errors }}</div>{% endif %}
+                </div>
+                <div class="form-field profit-opt" data-show-for="split_from_investor">
+                    <label class="form-label" for="{{ form.split_percent.id_for_label }}">{{ form.split_percent.label }}</label>
+                    {{ form.split_percent }}
+                    {% if form.split_percent.errors %}<div class="neg">{{ form.split_percent.errors }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-actions" style="border:0;padding-top:0;margin-top:0;margin-bottom:28px;">
+        <button type="submit" class="btn-accent">Сохранить</button>
+        <a href="{% url 'investors:detail' investor.pk %}" class="btn-ghost">Отмена</a>
+    </div>
+</form>
+
+<div class="section-label">Правила с даты</div>
+{% if rules %}
+<div class="panel table-panel panel-pad-0" style="margin-bottom:14px;">
+<div class="table-responsive">
+<table class="table">
+    <thead><tr>
+        <th>С</th><th>По</th><th>Режим</th>
+        <th class="text-end">Параметр</th><th>Источник</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for rl in rules %}
+    <tr>
+        <td class="num">{{ rl.effective_from|date:"d.m.Y" }}</td>
+        <td class="num">{% if rl.effective_to %}{{ rl.effective_to|date:"d.m.Y" }}{% else %}—{% endif %}</td>
+        <td><span class="pill gray">{{ rl.get_mode_display }}</span></td>
+        <td class="num text-end">{% if rl.mode == 'multiplier' %}×{{ rl.profit_share_multiplier|floatformat:2 }}{% elif rl.mode == 'fixed_pct' %}{{ rl.profit_share_fixed_pct|floatformat:2 }}%{% elif rl.mode == 'split_from_investor' %}{{ rl.split_percent|floatformat:2 }}%{% else %}—{% endif %}</td>
+        <td>{% if rl.source_investor %}{{ rl.source_investor.name }}{% else %}—{% endif %}</td>
+        <td class="text-end">
+            <form method="post" action="{% url 'investors:rule_delete' rl.pk %}" style="display:inline;">{% csrf_token %}
+                <button type="submit" class="btn-ghost btn-xs danger" onclick="return confirm('Удалить правило?')">Удалить</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+{% else %}
+<div class="panel" style="margin-bottom:14px;padding:20px;color:var(--txt-3);font-size:13px;">
+    Нет правил с даты — действует соглашение по умолчанию выше.
+</div>
+{% endif %}
+
+<div class="panel form-panel">
+    <div class="panel-head" style="margin-bottom:16px;">
+        <div>
+            <p class="panel-sub">Новое правило</p>
+            <h3 class="panel-title">Добавить с даты</h3>
+        </div>
+    </div>
+    <form method="post" action="{% url 'investors:rule_create' investor.pk %}">{% csrf_token %}
+        <div class="profit-block" data-profit-block data-mode-field="{{ rule_form.mode.id_for_label }}">
+            <div class="form-grid">
+                <div class="form-field">
+                    <label class="form-label" for="{{ rule_form.effective_from.id_for_label }}">{{ rule_form.effective_from.label }}</label>
+                    {{ rule_form.effective_from }}
+                </div>
+                <div class="form-field">
+                    <label class="form-label" for="{{ rule_form.effective_to.id_for_label }}">{{ rule_form.effective_to.label }}</label>
+                    {{ rule_form.effective_to }}
+                    <div class="help">Необязательно</div>
+                </div>
+                <div class="form-field span-2">
+                    <label class="form-label" for="{{ rule_form.mode.id_for_label }}">{{ rule_form.mode.label }}</label>
+                    {{ rule_form.mode }}
+                </div>
+                <div class="form-field profit-opt" data-show-for="multiplier">
+                    <label class="form-label" for="{{ rule_form.profit_share_multiplier.id_for_label }}">{{ rule_form.profit_share_multiplier.label }}</label>
+                    {{ rule_form.profit_share_multiplier }}
+                </div>
+                <div class="form-field profit-opt" data-show-for="fixed_pct">
+                    <label class="form-label" for="{{ rule_form.profit_share_fixed_pct.id_for_label }}">{{ rule_form.profit_share_fixed_pct.label }}</label>
+                    {{ rule_form.profit_share_fixed_pct }}
+                </div>
+                <div class="form-field profit-opt span-2" data-show-for="split_from_investor">
+                    <label class="form-label" for="{{ rule_form.source_investor.id_for_label }}">{{ rule_form.source_investor.label }}</label>
+                    {{ rule_form.source_investor }}
+                </div>
+                <div class="form-field profit-opt" data-show-for="split_from_investor">
+                    <label class="form-label" for="{{ rule_form.split_percent.id_for_label }}">{{ rule_form.split_percent.label }}</label>
+                    {{ rule_form.split_percent }}
+                </div>
+                <div class="form-field span-full">
+                    <label class="form-label" for="{{ rule_form.comment.id_for_label }}">{{ rule_form.comment.label }}</label>
+                    {{ rule_form.comment }}
+                </div>
+            </div>
+        </div>
+        <div class="form-actions" style="border:0;padding-top:14px;margin-top:0;">
+            <button type="submit" class="btn-accent">Добавить правило</button>
+        </div>
+    </form>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+{% include "investors/_profit_mode_script.html" %}
+{% endblock %}

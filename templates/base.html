@@ -202,6 +202,15 @@
     .form-field.form-check-row{display:flex;flex-direction:column;gap:5px;}
     .form-actions{display:flex;gap:9px;margin-top:22px;padding-top:18px;border-top:1px solid var(--border-soft);}
 
+    /* multi-column form layout */
+    .form-panel .form-field{max-width:none;margin-bottom:0;}
+    .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px;}
+    .form-grid .span-2{grid-column:span 2;}
+    .form-grid .span-full{grid-column:1/-1;}
+    .panel-hint{font-size:12.5px;color:var(--txt-3);line-height:1.5;margin:0;}
+    .profit-opt{transition:opacity .12s;}
+    @media(max-width:640px){.form-grid{grid-template-columns:1fr;}.form-grid .span-2{grid-column:span 1;}}
+
     /* alerts */
     .alert{border:1px solid var(--border);border-radius:var(--radius-sm);}
 

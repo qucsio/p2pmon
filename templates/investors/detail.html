@@ -33,9 +33,8 @@
 
 <div class="panel" style="margin-bottom:22px;display:flex;gap:24px;flex-wrap:wrap;">
     <div><p class="panel-sub">Активное правило</p><div style="font-weight:600;">{{ row.rule_mode }}{% if row.profit_coeff and row.profit_coeff != 1 %} · ×{{ row.profit_coeff|floatformat:2 }}{% endif %}</div></div>
-    {% if row.residual_investor %}<div><p class="panel-sub">Получатель остатка</p><div style="font-weight:600;">{{ row.residual_investor.name }}</div></div>{% endif %}
-    <div><p class="panel-sub">Передан остаток</p><div class="num" style="font-weight:600;">{{ row.residual_out|default:0|floatformat:0|intcomma }} ₽</div></div>
-    <div><p class="panel-sub">Получен остаток</p><div class="num" style="font-weight:600;">{{ row.residual_in|default:0|floatformat:0|intcomma }} ₽</div></div>
+    {% if row.source_investor %}<div><p class="panel-sub">Источник прибыли</p><div style="font-weight:600;">{{ row.source_investor.name }}</div></div>{% endif %}
+    <div><a href="{% url 'investors:edit' investor.pk %}" class="btn-ghost btn-xs" style="align-self:center;">Изменить соглашение</a></div>
 </div>
 
 <div class="row g-3" style="margin-bottom:22px;">
@@ -49,35 +48,26 @@
     </div></div>
 </div>
 
-<div class="section-label">Правила прибыли (история соглашений)</div>
-<div class="panel table-panel panel-pad-0" style="margin-bottom:14px;">
+<div class="section-label">Правила прибыли</div>
+<div class="panel table-panel panel-pad-0" style="margin-bottom:22px;">
 <div class="table-responsive">
 <table class="table">
-    <thead><tr><th>С даты</th><th>По дату</th><th>Режим</th><th class="text-end">Коэф/%</th><th>Источник</th><th>Остаток →</th><th></th></tr></thead>
+    <thead><tr><th>С</th><th>По</th><th>Режим</th><th class="text-end">Параметр</th><th>Источник</th></tr></thead>
     <tbody>
     {% for rl in rules %}
     <tr>
         <td class="num">{{ rl.effective_from|date:"d.m.Y" }}</td>
         <td class="num">{% if rl.effective_to %}{{ rl.effective_to|date:"d.m.Y" }}{% else %}—{% endif %}</td>
-        <td>{{ rl.get_mode_display }}</td>
+        <td><span class="pill gray">{{ rl.get_mode_display }}</span></td>
         <td class="num text-end">{% if rl.mode == 'multiplier' %}×{{ rl.profit_share_multiplier|floatformat:2 }}{% elif rl.mode == 'fixed_pct' %}{{ rl.profit_share_fixed_pct|floatformat:2 }}%{% elif rl.mode == 'split_from_investor' %}{{ rl.split_percent|floatformat:2 }}%{% else %}—{% endif %}</td>
         <td>{% if rl.source_investor %}{{ rl.source_investor.name }}{% else %}—{% endif %}</td>
-        <td>{% if rl.residual_investor %}{{ rl.residual_investor.name }}{% else %}—{% endif %}</td>
-        <td class="text-end"><form method="post" action="{% url 'investors:rule_delete' rl.pk %}" style="display:inline;">{% csrf_token %}<button class="btn-ghost btn-xs danger">Удалить</button></form></td>
     </tr>
     {% empty %}
-    <tr class="empty-row"><td colspan="7">Нет дат правил — используется текущая настройка инвестора</td></tr>
+    <tr class="empty-row"><td colspan="5">Нет правил с даты — действует настройка по умолчанию. <a href="{% url 'investors:edit' investor.pk %}">Изменить</a></td></tr>
     {% endfor %}
     </tbody>
 </table>
 </div>
-</div>
-<div class="panel" style="margin-bottom:22px;">
-    <p class="panel-sub" style="margin-bottom:10px;">Добавить правило (с даты)</p>
-    <form method="post" action="{% url 'investors:rule_create' investor.pk %}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">{% csrf_token %}
-        {% for f in rule_form %}<div class="form-field" style="margin:0;"><label class="form-label">{{ f.label }}</label>{{ f }}</div>{% endfor %}
-        <button class="btn-accent" type="submit">Добавить</button>
-    </form>
 </div>
 
 <div class="section-label">Движения капитала</div>

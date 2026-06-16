@@ -20,32 +20,41 @@ def _rebuild(account):
         rebuild_ledger.delay(account.id)
 
 
+PROFIT_ONLY_FIELDS = (
+    "profit_share_mode", "profit_share_multiplier",
+    "profit_share_fixed_pct", "source_investor", "split_percent",
+)
+
+
 class InvestorForm(forms.ModelForm):
     class Meta:
         model = Investor
         fields = (
-            "name", "profit_share_mode", "profit_share_multiplier",
-            "profit_share_fixed_pct", "source_investor", "split_percent",
-            "residual_investor", "is_active", "comment",
+            "name", "is_active", "comment",
+            *PROFIT_ONLY_FIELDS,
         )
         labels = {
-            "name": "Имя", "profit_share_mode": "Режим доли прибыли",
-            "profit_share_multiplier": "Множитель прибыли",
-            "profit_share_fixed_pct": "Фикс. % прибыли",
-            "source_investor": "Источник (для «доли от прибыли»)",
-            "split_percent": "% от прибыли источника",
-            "residual_investor": "Получатель остатка (для множителя/none)",
-            "is_active": "Активен", "comment": "Комментарий",
+            "name": "Имя",
+            "profit_share_mode": "Режим доли прибыли",
+            "profit_share_multiplier": "Множитель",
+            "profit_share_fixed_pct": "Фиксированный %",
+            "source_investor": "Источник прибыли",
+            "split_percent": "Доля от источника, %",
+            "is_active": "Активен",
+            "comment": "Комментарий",
         }
 
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, include_profit=True, **kwargs):
         super().__init__(*args, **kwargs)
+        if not include_profit:
+            for f in PROFIT_ONLY_FIELDS:
+                del self.fields[f]
         qs = Investor.objects.filter(user=user) if user else Investor.objects.none()
         if self.instance.pk:
             qs = qs.exclude(pk=self.instance.pk)
-        for f in ("source_investor", "residual_investor"):
-            self.fields[f].queryset = qs
-            self.fields[f].required = False
+        if "source_investor" in self.fields:
+            self.fields["source_investor"].queryset = qs
+            self.fields["source_investor"].required = False
 
 
 class ProfitRuleForm(forms.ModelForm):
@@ -53,18 +62,22 @@ class ProfitRuleForm(forms.ModelForm):
         model = InvestorProfitRule
         fields = (
             "mode", "profit_share_multiplier", "profit_share_fixed_pct",
-            "source_investor", "split_percent", "residual_investor",
+            "source_investor", "split_percent",
             "effective_from", "effective_to", "comment",
         )
         widgets = {
             "effective_from": forms.DateInput(attrs={"type": "date"}),
             "effective_to": forms.DateInput(attrs={"type": "date"}),
+            "comment": forms.Textarea(attrs={"rows": 2}),
         }
         labels = {
-            "mode": "Режим", "profit_share_multiplier": "Множитель",
-            "profit_share_fixed_pct": "Фикс. %", "source_investor": "Источник",
-            "split_percent": "% сплита", "residual_investor": "Получатель остатка",
-            "effective_from": "Действует с", "effective_to": "Действует по",
+            "mode": "Режим",
+            "profit_share_multiplier": "Множитель",
+            "profit_share_fixed_pct": "Фиксированный %",
+            "source_investor": "Источник прибыли",
+            "split_percent": "Доля от источника, %",
+            "effective_from": "Действует с",
+            "effective_to": "Действует по",
             "comment": "Комментарий",
         }
 
@@ -73,9 +86,10 @@ class ProfitRuleForm(forms.ModelForm):
         qs = Investor.objects.filter(user=user) if user else Investor.objects.none()
         if investor is not None:
             qs = qs.exclude(pk=investor.pk)
-        for f in ("source_investor", "residual_investor"):
-            self.fields[f].queryset = qs
-            self.fields[f].required = False
+        self.fields["source_investor"].queryset = qs
+        self.fields["source_investor"].required = False
+        self.fields["effective_to"].required = False
+        self.fields["comment"].required = False
 
 
 class CapitalTxnForm(forms.Form):
@@ -120,14 +134,19 @@ def investor_list(request):
 
 @login_required
 def investor_create(request):
-    form = InvestorForm(request.POST or None, user=request.user)
+    form = InvestorForm(request.POST or None, user=request.user, include_profit=False)
     if request.method == "POST" and form.is_valid():
         inv = form.save(commit=False)
         inv.user = request.user
         inv.save()
-        messages.success(request, "Инвестор добавлен.")
-        return redirect("investors:list")
-    return render(request, "investors/form.html", {"form": form, "title": "Добавить инвестора"})
+        messages.success(request, "Инвестор добавлен. Настройте соглашение о прибыли.")
+        return redirect("investors:edit", pk=inv.pk)
+    return render(request, "investors/form.html", {
+        "form": form,
+        "title": "Добавить инвестора",
+        "cancel_url": "investors:list",
+        "hint": "После создания можно настроить режим прибыли и правила с даты.",
+    })
 
 
 @login_required
@@ -138,7 +157,12 @@ def investor_edit(request, pk):
         form.save()
         messages.success(request, "Инвестор обновлён.")
         return redirect("investors:detail", pk=pk)
-    return render(request, "investors/form.html", {"form": form, "title": "Изменить инвестора"})
+    return render(request, "investors/edit.html", {
+        "investor": investor,
+        "form": form,
+        "rules": investor.profit_rules.all(),
+        "rule_form": ProfitRuleForm(user=request.user, investor=investor),
+    })
 
 
 @login_required
@@ -158,7 +182,6 @@ def investor_detail(request, pk):
         "row": row,
         "txns": list(reversed(txns)),
         "rules": investor.profit_rules.all(),
-        "rule_form": ProfitRuleForm(user=request.user, investor=investor),
         "cap_labels": json.dumps(rep["series_labels"]),
         "cap_values": json.dumps(rep["econ_series"].get(investor.id, [])),
         "earn_labels": json.dumps(rep["series_labels"]),
@@ -177,7 +200,7 @@ def rule_create(request, pk):
         messages.success(request, "Правило прибыли добавлено.")
     elif request.method == "POST":
         messages.error(request, "; ".join(str(e) for e in form.errors.values()))
-    return redirect("investors:detail", pk=pk)
+    return redirect("investors:edit", pk=pk)
 
 
 @login_required
@@ -187,7 +210,7 @@ def rule_delete(request, pk):
     if request.method == "POST":
         rule.delete()
         messages.success(request, "Правило удалено.")
-    return redirect("investors:detail", pk=inv_pk)
+    return redirect("investors:edit", pk=inv_pk)
 
 
 @login_required
@@ -217,7 +240,12 @@ def _capital_txn(request, pk, is_deposit):
             return redirect("investors:detail", pk=pk)
         except ValidationError as e:
             form.add_error(None, e)
-    return render(request, "investors/form.html", {"form": form, "title": title})
+    return render(request, "investors/form.html", {
+        "form": form,
+        "title": title,
+        "cancel_url": "investors:detail",
+        "cancel_pk": pk,
+    })
 
 
 @login_required

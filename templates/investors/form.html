@@ -2,13 +2,18 @@
 {% block title %}{{ title }}{% endblock %}
 {% block heading %}{{ title }}{% endblock %}
 {% block content %}
-<div class="panel" style="max-width:560px;">
+<div class="panel form-panel" style="max-width:520px;">
+    {% if hint %}<p class="panel-hint" style="margin-bottom:18px;">{{ hint }}</p>{% endif %}
     <form method="post">{% csrf_token %}
         {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
         {% include "_form_fields.html" %}
         <div class="form-actions">
             <button type="submit" class="btn-accent">Сохранить</button>
-            <a href="{% url 'investors:list' %}" class="btn-ghost">Отмена</a>
+            {% if cancel_pk %}
+            <a href="{% url cancel_url cancel_pk %}" class="btn-ghost">Отмена</a>
+            {% else %}
+            <a href="{% url cancel_url|default:'investors:list' %}" class="btn-ghost">Отмена</a>
+            {% endif %}
         </div>
     </form>
 </div>
