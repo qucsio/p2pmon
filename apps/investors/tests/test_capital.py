@@ -172,35 +172,80 @@ class ProfitModeTests(Base):
         self.assertEqual(services.capital_share_pct(partner, self.user), Decimal("0"))
 
 
-class SettlementTests(Base):
-    def _alloc_saved(self):
+class RetainedVsClaimTests(Base):
+    """Reinvestment-bug fix: capital investor profit is retained in NAV (no units
+    minted); only a non-capital claim (split/fixed) is settle-able."""
+
+    def _setup(self):
         self.snap(date(2026, 1, 1), "100000", "0")
-        self.a = self.mk("A")
+        self.a = self.mk("A")  # capital investor
         da = self.adj(LedgerAdjustment.TYPE_INVESTOR_DEPOSIT, "100000", date(2026, 1, 1))
         services.link_contribution(self.a, da, self.user, self.account)
-        self.snap(date(2026, 1, 2), "110000", "10000")
+        self.partner = self.mk("Partner", profit_share_mode=Investor.PROFIT_SPLIT,
+                               source_investor=self.a, split_percent=Decimal("50"))
+        self.snap(date(2026, 1, 2), "110000", "10000")  # +10k profit
         preview = services.compute_allocation(self.user, WIDE_FROM, WIDE_TO, self.account)
         services.save_allocation(self.user, WIDE_FROM, WIDE_TO, preview)
 
-    def test_paid_out_does_not_increase_units(self):
-        self._alloc_saved()
-        before = self.a.units
-        services.settle_period(self.user, self.account, WIDE_FROM, WIDE_TO,
-                               ProfitAllocation.STATUS_PAID_OUT)
-        self.assertEqual(self.a.units, before)
+    def test_capital_profit_creates_no_units(self):
+        self._setup()
+        # saving allocation must NOT mint units for A's retained profit
+        self.assertEqual(self.a.units, Decimal("100000"))  # only the 100k deposit
+        a_alloc = self.a.allocations.get()
+        self.assertEqual(a_alloc.status, ProfitAllocation.STATUS_RETAINED)
+        self.assertFalse(
+            self.a.capital_transactions.filter(
+                type=InvestorCapitalTransaction.TYPE_PROFIT_REINVEST
+            ).exists()
+        )
 
-    def test_reinvest_creates_units(self):
-        self._alloc_saved()
-        before = self.a.units
-        services.settle_period(self.user, self.account, WIDE_FROM, WIDE_TO,
-                               ProfitAllocation.STATUS_REINVESTED)
-        self.assertGreater(self.a.units, before)
+    def test_split_creates_unpaid_claim(self):
+        self._setup()
+        p_alloc = self.partner.allocations.get()
+        self.assertEqual(p_alloc.status, ProfitAllocation.STATUS_UNPAID_CLAIM)
+        self.assertEqual(p_alloc.net_profit, Decimal("5000.00"))
+
+    def test_reinvest_retained_is_blocked(self):
+        self._setup()
+        a_alloc = self.a.allocations.get()
+        with self.assertRaises(ValidationError):
+            services.settle_allocation(a_alloc, ProfitAllocation.STATUS_REINVESTED,
+                                       self.account, self.user)
+
+    def test_reinvest_claim_creates_units(self):
+        self._setup()
+        self.assertEqual(self.partner.units, Decimal("0"))
+        p_alloc = self.partner.allocations.get()
+        services.settle_allocation(p_alloc, ProfitAllocation.STATUS_REINVESTED,
+                                   self.account, self.user)
+        self.assertGreater(self.partner.units, Decimal("0"))
+
+    def test_later_deposit_not_diluted_by_retained_profit(self):
+        self._setup()
+        # A still holds exactly its deposited units — no fake units from retention.
+        self.assertEqual(self.a.units, Decimal("100000"))
+        # New investor deposits at the grown unit price (equity 110k / 100k units = 1.1).
+        self.snap(date(2026, 1, 3), "210000", "0")
+        b = self.mk("B")
+        db = self.adj(LedgerAdjustment.TYPE_INVESTOR_DEPOSIT, "110000", date(2026, 1, 3))
+        services.link_contribution(b, db, self.user, self.account)
+        txn = InvestorCapitalTransaction.objects.get(investor=b)
+        self.assertAlmostEqual(txn.unit_price, Decimal("1.1"), places=4)
+        self.assertAlmostEqual(b.units, Decimal("100000"), places=2)
+        self.assertEqual(self.a.units, Decimal("100000"))
+
+    def test_paid_out_claim_does_not_increase_units(self):
+        self._setup()
+        p_alloc = self.partner.allocations.get()
+        before = self.partner.units
+        services.settle_allocation(p_alloc, ProfitAllocation.STATUS_PAID_OUT,
+                                   self.account, self.user)
+        self.assertEqual(self.partner.units, before)
 
     def test_saved_allocation_frozen_after_deposit(self):
-        self._alloc_saved()
-        alloc = self.a.allocations.first()
+        self._setup()
+        alloc = self.a.allocations.get()
         frozen = alloc.net_profit
-        # later deposit must not change already-saved allocation amounts
         self.snap(date(2026, 2, 1), "300000", "0")
         dep = self.adj(LedgerAdjustment.TYPE_INVESTOR_DEPOSIT, "200000", date(2026, 2, 1))
         b = self.mk("B")

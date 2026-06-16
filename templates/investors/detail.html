@@ -52,13 +52,9 @@
         <td class="num">{{ a.period_from|date:"d.m.Y" }} – {{ a.period_to|date:"d.m.Y" }}</td>
         <td class="num text-end">{{ a.profit_share_pct|floatformat:2 }}%</td>
         <td class="num text-end {% if a.net_profit >= 0 %}pos{% else %}neg{% endif %}">{{ a.net_profit|floatformat:0|intcomma }} ₽</td>
-        <td>
-            {% if a.status == 'paid_out' %}<span class="pill green">Выплачено</span>
-            {% elif a.status == 'reinvested' %}<span class="pill" style="color:var(--blue);background:var(--blue-soft);">Реинвест.</span>
-            {% else %}<span class="pill gray">Не выплачено</span>{% endif %}
-        </td>
+        <td>{% include "investors/_status_pill.html" with status=a.status %}</td>
         <td class="text-end" style="white-space:nowrap;">
-            {% if a.status == 'unpaid' %}
+            {% if a.status == 'unpaid_claim' %}
             <form method="post" action="{% url 'investors:allocation_settle' a.pk %}" style="display:inline;">{% csrf_token %}
                 <input type="hidden" name="status" value="paid_out">
                 <button class="btn-ghost btn-xs ok">Выплатить</button>
@@ -67,6 +63,7 @@
                 <input type="hidden" name="status" value="reinvested">
                 <button class="btn-ghost btn-xs">Реинвест</button>
             </form>
+            {% elif a.status == 'retained_in_capital' %}<span style="color:var(--txt-3);">в NAV</span>
             {% else %}<span style="color:var(--txt-3);">заморожено</span>{% endif %}
         </td>
     </tr>

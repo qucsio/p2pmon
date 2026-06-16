@@ -409,16 +409,16 @@ def save_allocation(user, period_from, period_to, preview):
     rows for the period; already paid/reinvested allocations stay frozen."""
     from datetime import timedelta
 
+    SETTLED = (ProfitAllocation.STATUS_PAID_OUT, ProfitAllocation.STATUS_REINVESTED)
+    # Re-savable rows are those not yet settled (retained / claim / legacy unpaid).
     ProfitAllocation.objects.filter(
         investor__user=user, period_from=period_from, period_to=period_to,
-        status=ProfitAllocation.STATUS_UNPAID,
-    ).delete()
+    ).exclude(status__in=SETTLED).delete()
     settled_ids = set(
         ProfitAllocation.objects.filter(
-            investor__user=user, period_from=period_from, period_to=period_to
-        )
-        .exclude(status=ProfitAllocation.STATUS_UNPAID)
-        .values_list("investor_id", flat=True)
+            investor__user=user, period_from=period_from, period_to=period_to,
+            status__in=SETTLED,
+        ).values_list("investor_id", flat=True)
     )
 
     created = []
@@ -426,12 +426,17 @@ def save_allocation(user, period_from, period_to, preview):
         inv = r["investor"]
         if inv.id in settled_ids:
             continue
+        # Capital investors' profit is already in NAV → retained, not payable.
+        # Split/fixed participants' profit is a real claim.
+        status = (ProfitAllocation.STATUS_UNPAID_CLAIM if inv.profit_is_claim
+                  else ProfitAllocation.STATUS_RETAINED)
         created.append(ProfitAllocation.objects.create(
             period_from=period_from, period_to=period_to, investor=inv,
             share_percent=r["profit_share_pct"],
             capital_share_pct=r["capital_share_pct"],
             profit_share_pct=r["profit_share_pct"],
             net_profit=r["net_profit"],
+            status=status,
         ))
 
         opening = (
@@ -453,7 +458,8 @@ def save_allocation(user, period_from, period_to, preview):
                 "profit_share_pct": r["profit_share_pct"],
                 "earned_profit_rub": r["net_profit"],
                 "cumulative_earned_profit_rub": cumulative,
-                "unpaid_profit_rub": r["net_profit"],
+                # Only a payable claim is "unpaid"; retained NAV profit is not.
+                "unpaid_profit_rub": r["net_profit"] if inv.profit_is_claim else Decimal("0"),
                 "paid_out_profit_rub": Decimal("0"),
                 "reinvested_profit_rub": Decimal("0"),
             },
@@ -463,8 +469,15 @@ def save_allocation(user, period_from, period_to, preview):
 
 @transaction.atomic
 def settle_allocation(allocation, status, account, user, effective_at=None):
-    """Mark an allocation as paid out or reinvested, posting the side effects."""
-    if allocation.status != ProfitAllocation.STATUS_UNPAID:
+    """Mark a CLAIM allocation as paid out or reinvested, posting side effects.
+    Capital investors' retained (in-NAV) profit cannot be settled — it would mint
+    fake units / pay out value already reflected in their unit price."""
+    if allocation.status == ProfitAllocation.STATUS_RETAINED:
+        raise ValidationError(
+            "Это удержанная в капитале прибыль (уже в стоимости юнитов) — "
+            "её нельзя выплатить или реинвестировать отдельно."
+        )
+    if allocation.status not in ProfitAllocation.CLAIM_STATUSES:
         raise ValidationError("Эта аллокация уже закрыта и заморожена.")
     effective_at = effective_at or timezone.now()
     amount = allocation.net_profit
@@ -549,11 +562,14 @@ def settle_period(user, account, period_from, period_to, status, effective_at=No
     allocs = list(
         ProfitAllocation.objects.filter(
             investor__user=user, period_from=period_from, period_to=period_to,
-            status=ProfitAllocation.STATUS_UNPAID,
+            status__in=ProfitAllocation.CLAIM_STATUSES,
         ).select_related("investor")
     )
     if not allocs:
-        raise ValidationError("Нет невыплаченных аллокаций за этот период.")
+        raise ValidationError(
+            "Нет невыплаченных требований за этот период "
+            "(прибыль обычных инвесторов удержана в капитале и не выплачивается отдельно)."
+        )
 
     price = current_unit_price(user, account)  # recompute re-derives day-open price
     for a in allocs:

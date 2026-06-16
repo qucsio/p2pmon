@@ -91,7 +91,15 @@ class Investor(TimestampedModel):
         )
 
     def unpaid_total(self) -> Decimal:
-        return self.settled_total(ProfitAllocation.STATUS_UNPAID)
+        return self.settled_total(ProfitAllocation.STATUS_UNPAID_CLAIM)
+
+    def retained_total(self) -> Decimal:
+        return self.settled_total(ProfitAllocation.STATUS_RETAINED)
+
+    @property
+    def profit_is_claim(self) -> bool:
+        """True when this participant's profit is a payable claim (not in NAV)."""
+        return self.profit_share_mode in (self.PROFIT_SPLIT, self.PROFIT_FIXED_PCT)
 
 
 class InvestorCapitalTransaction(TimestampedModel):
@@ -164,14 +172,23 @@ class TaxSetting(TimestampedModel):
 
 
 class ProfitAllocation(models.Model):
-    STATUS_UNPAID = "unpaid"
+    # A capital investor's own share is already in NAV → retained, not payable.
+    STATUS_RETAINED = "retained_in_capital"
+    # Profit owed to a non-capital participant (split/fixed) → a real claim.
+    STATUS_UNPAID_CLAIM = "unpaid_claim"
     STATUS_PAID_OUT = "paid_out"
     STATUS_REINVESTED = "reinvested"
+    # Legacy value kept only so old rows load; no longer assigned.
+    STATUS_UNPAID = "unpaid"
     STATUS_CHOICES = [
-        (STATUS_UNPAID, "Не выплачено"),
+        (STATUS_RETAINED, "В капитале (NAV)"),
+        (STATUS_UNPAID_CLAIM, "Невыплаченное требование"),
         (STATUS_PAID_OUT, "Выплачено"),
         (STATUS_REINVESTED, "Реинвестировано"),
+        (STATUS_UNPAID, "Не выплачено (устар.)"),
     ]
+    # Statuses that represent a payable claim (settle-able).
+    CLAIM_STATUSES = (STATUS_UNPAID_CLAIM,)
 
     period_from = models.DateField()
     period_to = models.DateField()
@@ -188,7 +205,7 @@ class ProfitAllocation(models.Model):
     fees_part = models.DecimalField(**settings.DECIMAL_RUB, default=0)
     tax_part = models.DecimalField(**settings.DECIMAL_RUB, default=0)
     net_profit = models.DecimalField(**settings.DECIMAL_RUB, default=0)
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_UNPAID)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_RETAINED)
     settled_at = models.DateTimeField(null=True, blank=True)
     settlement_txn = models.ForeignKey(
         InvestorCapitalTransaction,
