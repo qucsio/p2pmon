@@ -6,13 +6,13 @@ Django web application for Bybit P2P USDT/RUB accounting.
 
 ```bash
 cp .env.example .env
-# Generate encryption key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# Set FIELD_ENCRYPTION_KEY in .env
+# Fill in SECRET_KEY, POSTGRES_PASSWORD, FIELD_ENCRYPTION_KEY and DJANGO_SUPERUSER_PASSWORD
+# (the generate commands are in .env.example). Never copy key values from the example.
 
 docker compose up --build
 ```
 
-Open http://localhost:8000 — login `admin` / `admin`
+Open http://localhost:1337 — log in with DJANGO_SUPERUSER_USERNAME / DJANGO_SUPERUSER_PASSWORD from `.env`
 
 ## Setup Bybit account
 
